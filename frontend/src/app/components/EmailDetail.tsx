@@ -134,19 +134,64 @@ function RiskMeter({ score, level }: { score: number; level: RiskLevel }) {
     );
 }
 
-function ReputationBadge({ rep }: { rep: "Trusted" | "Suspicious" | "Malicious" }) {
-    const map = {
-        Trusted: { color: "#22c55e", icon: CheckCircle },
-        Suspicious: { color: "#eab308", icon: AlertTriangle },
-        Malicious: { color: "#ef4444", icon: XCircle },
-    };
-    const { color, icon: Icon } = map[rep];
+type RepValue = string | null | undefined;
+
+const repMap: Record<
+    string,
+    { color: string; label: string; icon: any }
+> = {
+    Trusted: {
+        color: "#22c55e",
+        label: "Надійний",
+        icon: CheckCircle,
+    },
+    Suspicious: {
+        color: "#eab308",
+        label: "Підозрілий",
+        icon: AlertTriangle,
+    },
+    Malicious: {
+        color: "#ef4444",
+        label: "Шкідливий",
+        icon: XCircle,
+    },
+    Neutral: {
+        color: "#60a5fa",
+        label: "Нейтральний",
+        icon: Shield,
+    },
+};
+
+function normalize(rep: RepValue): string {
+    if (!rep) return "Neutral";
+
+    return rep
+        .toString()
+        .trim()
+        .toLowerCase()
+        .replace(/^./, (c) => c.toUpperCase());
+}
+
+export function ReputationBadge({ rep }: { rep: RepValue }) {
+    const safeRep = normalize(rep);
+
+    const data = repMap[safeRep] ?? repMap["Neutral"];
+
+    const Icon = data.icon;
+
     return (
         <div className="flex items-center gap-1.5">
-            <Icon className="w-4 h-4" style={{ color }} />
-            <span style={{ color, fontFamily: "var(--font-mono)", fontSize: "0.8rem", fontWeight: 600 }}>
-        {repTranslations[rep]}
-      </span>
+            <Icon className="w-4 h-4" style={{ color: data.color }} />
+            <span
+                style={{
+                    color: data.color,
+                    fontFamily: "var(--font-mono)",
+                    fontSize: "0.8rem",
+                    fontWeight: 600,
+                }}
+            >
+                {data.label}
+            </span>
         </div>
     );
 }
