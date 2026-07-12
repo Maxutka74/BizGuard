@@ -50,6 +50,7 @@ class GoogleAuthURLView(APIView):
     Returns the Google OAuth consent URL for the "Continue with Google" button.
     """
     permission_classes = [AllowAny]
+    authentication_classes = []
     throttle_scope = "google_auth_url"
 
     def get(self, request):
@@ -80,6 +81,7 @@ class GoogleAuthURLView(APIView):
 class GooglePublicAuthURLView(APIView):
     """GET /api/accounts/google/public-url for purchase site login without Gmail scope."""
     permission_classes = [AllowAny]
+    authentication_classes = []
     throttle_scope = "google_auth_url"
 
     def get(self, request):
@@ -139,6 +141,7 @@ class GooglePublicAuthRedirectView(APIView):
 
 class GooglePublicAuthCallbackView(APIView):
     permission_classes = [AllowAny]
+    authentication_classes = []
     throttle_scope = "google_callback"
 
     def post(self, request):
@@ -173,6 +176,7 @@ class GooglePublicAuthCallbackView(APIView):
 
 class GoogleAuthCallbackView(APIView):
     permission_classes = [AllowAny]
+    authentication_classes = []
     throttle_scope = "google_callback"
 
     def post(self, request):

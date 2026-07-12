@@ -1,4 +1,4 @@
-﻿from django.test import TestCase
+from django.test import TestCase
 from rest_framework.test import APIClient
 from rest_framework_simplejwt.tokens import RefreshToken
 
@@ -66,6 +66,20 @@ class CookieAuthTests(TestCase):
         self.assertIn("scope=openid+email+profile", response.data["url"])
         self.assertNotIn("gmail.modify", response.data["url"])
         self.assertIn("prompt=select_account+consent", response.data["url"])
+
+    def test_public_google_auth_url_ignores_stale_auth_cookie(self):
+        stale_user = User.objects.create(email="stale-cookie@example.com")
+        refresh = RefreshToken.for_user(stale_user)
+        stale_user.delete()
+        self.client.cookies[ACCESS_COOKIE] = str(refresh.access_token)
+
+        response = self.client.get(
+            "/api/accounts/google/public-url",
+            {"redirect_uri": "http://localhost:5174/auth/callback"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("scope=openid+email+profile", response.data["url"])
 
     def test_bizguard_google_auth_url_still_requires_gate_token(self):
         response = self.client.get(
