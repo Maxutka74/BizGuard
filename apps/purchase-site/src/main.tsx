@@ -317,8 +317,7 @@ function App() {
   async function buyPlan(plan: PlanId) {
     const activationCount = activationCounts[plan] || 1
     if (!user) {
-      setError('Спочатку увійдіть через Google, щоб оформити покупку.')
-      window.scrollTo({ top: 0, behavior: 'smooth' })
+      await loginWithGoogle('plans', plan, activationCount)
       return
     }
     await startCheckout(plan, activationCount)
@@ -512,7 +511,7 @@ function PlansView({
                 {plan.features.map((feature) => <li key={feature}><Check size={16} /> {feature}</li>)}
               </ul>
               <button className="primary full" onClick={() => onBuy(plan.id)} disabled={busyPlan === plan.id}>
-                {busyPlan === plan.id ? 'Створення оплати...' : user ? 'Купити ключ' : 'Спочатку увійдіть'}
+                {busyPlan === plan.id ? 'Створення оплати...' : user ? 'Купити ключ' : 'Увійти і купити'}
               </button>
             </article>
           )

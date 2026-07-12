@@ -2,6 +2,7 @@ from unittest.mock import Mock, patch
 
 from django.test import TestCase, override_settings
 from rest_framework.test import APIClient
+from rest_framework_simplejwt.tokens import RefreshToken
 
 from apps.accounts.models import User
 from apps.licenses.models import LicenseKey
@@ -18,6 +19,23 @@ class BillingTests(TestCase):
         client = APIClient()
         response = client.post("/api/billing/checkout", {"plan": "half_year"}, format="json")
         self.assertEqual(response.status_code, 401)
+
+    def test_billing_endpoints_do_not_require_active_license(self):
+        client = APIClient()
+        refresh = RefreshToken.for_user(self.user)
+        auth = f"Bearer {refresh.access_token}"
+
+        profile = client.get("/api/billing/profile", HTTP_AUTHORIZATION=auth)
+        self.assertEqual(profile.status_code, 200)
+
+        checkout = client.post(
+            "/api/billing/checkout",
+            {"plan": "half_year", "activationCount": 2},
+            format="json",
+            HTTP_AUTHORIZATION=auth,
+        )
+        self.assertEqual(checkout.status_code, 200)
+        self.assertEqual(checkout.data["price"]["activationCount"], 2)
 
     def test_fake_checkout_creates_order_and_complete_generates_key_once(self):
         checkout = self.client.post(
