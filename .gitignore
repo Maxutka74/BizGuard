@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+*.env
+.venv/
+venv/
+
+# Django
+*.log
+local_settings.py
+db.sqlite3
+media/
+
+# Docker
+.env
+
+# IDE
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+# Frontend builds/dependencies
+node_modules/
+dist/
+apps/*/node_modules/
+apps/*/dist/
+frontend/node_modules/
+frontend/dist/
+# Legacy/backup local artifacts
+.git.bak-*/
+frontend/
+backend/celerybeat-schedule
+apps/*/.git.simple
+backend/.git.sample
