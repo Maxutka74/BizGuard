@@ -158,6 +158,14 @@ export interface TrustedSenderRule {
   active: boolean;
   created_at: string;
 }
+export interface GmailConnectInit {
+  authorization_url: string;
+  state: string;
+}
+
+export async function startGmailConnect(): Promise<GmailConnectInit> {
+  return api.get("/gmail/auth/init/");
+}
 export interface GmailAccountStatus {
   connected: boolean;
   account?: {

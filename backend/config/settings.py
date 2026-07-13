@@ -186,6 +186,9 @@ GOOGLE_OAUTH_REDIRECT_URI = os.environ.get(
 GOOGLE_PUBLIC_OAUTH_REDIRECT_URI = os.environ.get(
     "GOOGLE_PUBLIC_OAUTH_REDIRECT_URI", "http://localhost:8000/api/accounts/google/public-redirect"
 )
+GMAIL_OAUTH_REDIRECT_URI = os.environ.get(
+    "GMAIL_OAUTH_REDIRECT_URI", "http://localhost:8000/api/gmail/auth/callback/"
+)
 # Aliases used by apps.gmail.services.oauth
 GOOGLE_CLIENT_ID = GOOGLE_OAUTH_CLIENT_ID
 GOOGLE_CLIENT_SECRET = GOOGLE_OAUTH_CLIENT_SECRET

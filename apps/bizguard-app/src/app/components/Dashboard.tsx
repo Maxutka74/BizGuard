@@ -21,6 +21,7 @@ import {
     fetchEmailProgress,
     fetchEmailStats,
     fetchGmailStatus,
+    startGmailConnect,
     fetchScanStatus,
     fetchTrustedSenderRules,
     createTrustedSenderRule,
@@ -124,6 +125,16 @@ function formatDate(value?: string | null) {
         year: "numeric",
     });
 }
+const emptyEmailStats: EmailStats = {
+    total: 0,
+    analyzed: 0,
+    pendingAi: 0,
+    suspicious: 0,
+    high: 0,
+    critical: 0,
+    distribution: { Critical: 0, High: 0, Medium: 0, Safe: 0 },
+    lastScannedAt: null,
+};
 
 export function Dashboard({ user, onSelectEmail, onLogout }: DashboardProps) {
     const [search, setSearch] = useState("");
@@ -140,6 +151,7 @@ export function Dashboard({ user, onSelectEmail, onLogout }: DashboardProps) {
     const [showPlanPanel, setShowPlanPanel] = useState(false);
     const [plans, setPlans] = useState<LicensePlanInfo[]>([]);
     const [gmailStatus, setGmailStatus] = useState<GmailAccountStatus | null>(null);
+    const [gmailConnecting, setGmailConnecting] = useState(false);
     const [trustedRules, setTrustedRules] = useState<TrustedSenderRule[]>([]);
     const [trustedRuleType, setTrustedRuleType] = useState<"domain" | "email">("domain");
     const [trustedRuleValue, setTrustedRuleValue] = useState("");
@@ -157,6 +169,8 @@ export function Dashboard({ user, onSelectEmail, onLogout }: DashboardProps) {
     const planLabel = user?.license?.planLabel ?? "Ліцензія";
     const criticalAlertsEnabled = Boolean(capabilities?.criticalAlerts);
     const highCriticalCount = stats?.high ?? ((stats?.distribution?.High ?? 0) + (stats?.distribution?.Critical ?? 0));
+    const gmailConnected = gmailStatus?.connected === true;
+    const gmailChecked = gmailStatus !== null;
     const gmailReconnectRequired = Boolean(capabilities?.autoSpamCritical && gmailStatus?.account?.reconnectRequired);
 
     useEffect(() => {
@@ -165,7 +179,7 @@ export function Dashboard({ user, onSelectEmail, onLogout }: DashboardProps) {
             .catch(() => setPlans([]));
         fetchGmailStatus()
             .then(setGmailStatus)
-            .catch(() => setGmailStatus(null));
+            .catch(() => setGmailStatus({ connected: false }));
     }, []);
 
     const loadTrustedRules = useCallback(() => {
@@ -217,6 +231,16 @@ export function Dashboard({ user, onSelectEmail, onLogout }: DashboardProps) {
 
     const loadEmails = useCallback(() => {
         setError(null);
+        if (!gmailChecked) {
+            return Promise.resolve({ emailsRes: { emails: [], total: 0 }, statsRes: emptyEmailStats });
+        }
+        if (!gmailConnected) {
+            setEmails([]);
+            setTotal(0);
+            setStats(emptyEmailStats);
+            setLoading(false);
+            return Promise.resolve({ emailsRes: { emails: [], total: 0 }, statsRes: emptyEmailStats });
+        }
         // @ts-ignore
         return Promise.all([
             fetchEmails({ search, risk_level: filterRisk }),
@@ -235,7 +259,7 @@ export function Dashboard({ user, onSelectEmail, onLogout }: DashboardProps) {
                 setError(err?.detail ?? "Не вдалося завантажити листи");
                 setLoading(false);
             });
-    }, [search, filterRisk]);
+    }, [search, filterRisk, gmailChecked, gmailConnected]);
 
 
     const mergeProgress = useCallback((progress: any) => {
@@ -358,7 +382,7 @@ export function Dashboard({ user, onSelectEmail, onLogout }: DashboardProps) {
             }
         };
         const run = () => {
-            if (cancelled || !user?.email) return;
+            if (cancelled || !user?.email || !gmailConnected) return;
             if (document.hidden) {
                 schedule(10000);
                 return;
@@ -386,9 +410,27 @@ export function Dashboard({ user, onSelectEmail, onLogout }: DashboardProps) {
             clearProgressTimer();
             document.removeEventListener("visibilitychange", onVisibilityChange);
         };
-    }, [mergeProgress, scanning, user?.email]);
+    }, [gmailConnected, mergeProgress, scanning, user?.email]);
+    const handleConnectGmail = useCallback(() => {
+        if (gmailConnecting) return;
+        setGmailConnecting(true);
+        setError(null);
+        startGmailConnect()
+            .then((payload) => {
+                window.location.href = payload.authorization_url;
+            })
+            .catch((err: any) => {
+                setError(err?.detail ?? "Не вдалося почати підключення Gmail.");
+                setGmailConnecting(false);
+            });
+    }, [gmailConnecting]);
+
     const handleScan = useCallback(() => {
         if (scanning) return;
+        if (!gmailConnected) {
+            setError("Спочатку підключіть Gmail, щоб сканувати листи.");
+            return;
+        }
         setScanning(true);
         setScanStatus(null);
         stopPolling();
@@ -420,17 +462,17 @@ export function Dashboard({ user, onSelectEmail, onLogout }: DashboardProps) {
                 setError(err?.detail ?? "Помилка сканування");
                 setScanning(false);
             });
-    }, [loadEmails, pollScanUntilComplete, scanLimit, scanning, stopPolling]);
+    }, [gmailConnected, loadEmails, pollScanUntilComplete, scanLimit, scanning, stopPolling]);
 
     useEffect(() => {
-        if (autoScanStarted || loading || scanning || search || filterRisk !== "All") {
+        if (autoScanStarted || loading || scanning || search || filterRisk !== "All" || !gmailConnected) {
             return;
         }
         if ((stats?.total ?? 0) === 0 && user?.email) {
             setAutoScanStarted(true);
             handleScan();
         }
-    }, [autoScanStarted, filterRisk, handleScan, loading, scanning, search, stats?.total, user?.email]);
+    }, [autoScanStarted, filterRisk, gmailConnected, handleScan, loading, scanning, search, stats?.total, user?.email]);
 
     const riskFilters: (RiskLevel | "All")[] = ["All", "Critical", "High", "Medium", "Safe"];
     const distribution = stats?.distribution ?? { Critical: 0, High: 0, Medium: 0, Safe: 0 };
@@ -793,6 +835,48 @@ export function Dashboard({ user, onSelectEmail, onLogout }: DashboardProps) {
                     </div>
                 )}
 
+                {gmailChecked && !gmailConnected && (
+                    <div
+                        className="rounded-xl p-6"
+                        style={{ background: "var(--card)", border: "1px solid var(--border)" }}
+                    >
+                        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+                            <div className="flex items-start gap-3">
+                                <div
+                                    className="w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0"
+                                    style={{ background: "rgba(59,130,246,0.12)", border: "1px solid rgba(96,165,250,0.28)" }}
+                                >
+                                    <Mail className="w-5 h-5" style={{ color: "#60a5fa" }} />
+                                </div>
+                                <div>
+                                    <h2 style={{ color: "var(--foreground)", fontWeight: 700, fontSize: "1.05rem" }}>
+                                        Підключіть Gmail для сканування листів
+                                    </h2>
+                                    <p style={{ color: "var(--muted-foreground)", fontSize: "0.88rem", marginTop: 6, lineHeight: 1.55 }}>
+                                        Ліцензія активна, але Gmail-доступ ще не підключено. Натисніть кнопку нижче, оберіть потрібний Google акаунт і надайте доступ Gmail, щоб BizGuard міг завантажувати та аналізувати листи.
+                                    </p>
+                                </div>
+                            </div>
+                            <button
+                                onClick={handleConnectGmail}
+                                disabled={gmailConnecting}
+                                className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg transition-all duration-200 hover:opacity-90 active:scale-[0.98]"
+                                style={{
+                                    background: "var(--primary)",
+                                    color: "#fff",
+                                    fontSize: "0.9rem",
+                                    fontWeight: 650,
+                                    border: "none",
+                                    cursor: gmailConnecting ? "not-allowed" : "pointer",
+                                    opacity: gmailConnecting ? 0.7 : 1,
+                                }}
+                            >
+                                <Mail className="w-4 h-4" />
+                                {gmailConnecting ? "Перехід до Google..." : "Підключити Gmail"}
+                            </button>
+                        </div>
+                    </div>
+                )}
                 {gmailReconnectRequired && (
                     <div
                         className="rounded-lg px-4 py-3 flex items-center gap-2"

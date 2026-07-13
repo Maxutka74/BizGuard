@@ -1,11 +1,11 @@
-﻿import { useMemo, useState, type FormEvent } from "react";
+import { useMemo, useState, type FormEvent } from "react";
 import { AlertCircle, CheckCircle, KeyRound, LockKeyhole, LogOut, Shield } from "lucide-react";
 import type { User } from "../../api/auth";
 import type { LicenseStatus } from "../../api/licenses";
 
 interface LicenseGateProps {
   user: User | null;
-  onActivate: (key: string) => Promise<LicenseStatus>;
+  onActivate: (key: string) => Promise<LicenseStatus | void>;
   onLogout: () => void;
   isBusy?: boolean;
   errorMessage?: string;
@@ -37,7 +37,7 @@ export function LicenseGate({
     if (!licenseKey.trim() || isBusy) return;
     try {
       const license = await onActivate(licenseKey.trim());
-      setSuccess(license.status === "active");
+      setSuccess(license?.status === "active");
     } catch {
       setSuccess(false);
     }

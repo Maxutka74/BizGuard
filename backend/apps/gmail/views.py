@@ -1,9 +1,10 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import logging
 import secrets
 
-from django.shortcuts import get_object_or_404
+from django.conf import settings
+from django.shortcuts import get_object_or_404, redirect
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes, throttle_classes
@@ -305,25 +306,32 @@ def oauth_callback(request: Request) -> Response:
     code = request.query_params.get("code")
     state = request.query_params.get("state")
     error = request.query_params.get("error")
+    wants_json = "application/json" in request.headers.get("accept", "").lower() or request.query_params.get("format") == "json"
+
+    def finish_with_error(code_value: str, detail: str, response_status: int = 400):
+        if wants_json:
+            return Response({"detail": detail, "code": code_value}, status=response_status)
+        frontend_url = settings.BIZGUARD_APP_URL.rstrip("/")
+        return redirect(f"{frontend_url}/?gmail_error={code_value}")
 
     if error:
-        return Response({"detail": f"Помилка авторизації Google: {error}"}, status=400)
+        return finish_with_error("google_oauth_error", f"Помилка авторизації Google: {error}")
     if not code:
-        return Response({"detail": "Google не повернув код авторизації."}, status=400)
+        return finish_with_error("missing_code", "Google не повернув код авторизації.")
 
     session_state = request.session.get("oauth_state")
     if session_state and state != session_state:
-        return Response({"detail": "Не вдалося перевірити захисний OAuth state."}, status=400)
+        return finish_with_error("invalid_state", "Не вдалося перевірити захисний OAuth state.")
 
     try:
         tokens = exchange_code_for_tokens(code)
     except Exception as exc:
         logger.exception("Token exchange failed: %s", exc)
-        return Response({"detail": "Не вдалося обміняти код авторизації Google."}, status=502)
+        return finish_with_error("token_exchange_failed", "Не вдалося обміняти код авторизації Google.", 502)
 
     userinfo = get_google_userinfo(tokens["access_token"])
     if not userinfo or not userinfo.get("email"):
-        return Response({"detail": "Не вдалося отримати email Google акаунта."}, status=502)
+        return finish_with_error("missing_google_email", "Не вдалося отримати email Google акаунта.", 502)
 
     gmail_email = userinfo["email"]
     expiry = tokens.get("expiry")
@@ -346,10 +354,14 @@ def oauth_callback(request: Request) -> Response:
     _trigger_sync(account)
 
     serializer = EmailAccountSerializer(account)
-    return Response(
-        {"account": serializer.data, "created": created, "message": "Gmail акаунт підключено."},
-        status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
-    )
+    if wants_json:
+        return Response(
+            {"account": serializer.data, "created": created, "message": "Gmail акаунт підключено."},
+            status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
+        )
+
+    frontend_url = settings.BIZGUARD_APP_URL.rstrip("/")
+    return redirect(f"{frontend_url}/?gmail=connected")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -438,11 +450,7 @@ def _get_account_or_404(request: Request) -> EmailAccount:
         return account
 
     from rest_framework.exceptions import NotFound
-    raise NotFound(
-        "No Gmail account connected. "
-        "Please connect via GET /api/gmail/auth/init/ or POST /api/gmail/scan/ "
-        "after connecting via /api/accounts/google/."
-    )
+    raise NotFound({"detail": "Gmail акаунт ще не підключено. Підключіть Gmail, щоб сканувати листи.", "code": "gmail_not_connected"})
 
 
 def _try_create_account_from_allauth(user) -> "EmailAccount | None":

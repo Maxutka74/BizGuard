@@ -49,6 +49,7 @@ Authorized redirect URIs:
 http://localhost:5173/auth/callback
 http://localhost:5174/auth/callback
 http://localhost:8000/api/accounts/google/public-redirect
+http://localhost:8000/api/gmail/auth/callback/
 ```
 
 Purchase site використовує тільки `openid email profile`. Основний BizGuard app використовує Gmail scope і потребує license key перед Gmail login.

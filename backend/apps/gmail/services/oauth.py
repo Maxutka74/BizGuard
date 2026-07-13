@@ -31,7 +31,7 @@ _CLIENT_CONFIG = lambda: {  # noqa: E731
         "client_secret": settings.GOOGLE_CLIENT_SECRET,
         "auth_uri": "https://accounts.google.com/o/oauth2/auth",
         "token_uri": "https://oauth2.googleapis.com/token",
-        "redirect_uris": [settings.GOOGLE_REDIRECT_URI],
+        "redirect_uris": [settings.GMAIL_OAUTH_REDIRECT_URI],
     }
 }
 
@@ -41,7 +41,7 @@ def build_authorization_url(state: str) -> str:
     import google_auth_oauthlib.flow as _flow
 
     flow = _flow.Flow.from_client_config(_CLIENT_CONFIG(), scopes=SCOPES)
-    flow.redirect_uri = settings.GOOGLE_REDIRECT_URI
+    flow.redirect_uri = settings.GMAIL_OAUTH_REDIRECT_URI
     url, _ = flow.authorization_url(
         access_type="offline",
         include_granted_scopes="true",
@@ -65,7 +65,7 @@ def exchange_code_for_tokens(code: str) -> dict:
     import google_auth_oauthlib.flow as _flow
 
     flow = _flow.Flow.from_client_config(_CLIENT_CONFIG(), scopes=SCOPES)
-    flow.redirect_uri = settings.GOOGLE_REDIRECT_URI
+    flow.redirect_uri = settings.GMAIL_OAUTH_REDIRECT_URI
     flow.fetch_token(code=code)
     creds = flow.credentials
     return {
