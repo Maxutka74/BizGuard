@@ -55,6 +55,9 @@ services:
       OLLAMA_KEEP_ALIVE: ${OLLAMA_KEEP_ALIVE:-10m}
       PURCHASE_SITE_URL: ${PURCHASE_SITE_URL:-http://localhost:5174}
       BIZGUARD_APP_URL: ${BIZGUARD_APP_URL:-http://localhost:5173}
+      GOOGLE_OAUTH_REDIRECT_URI: ${GOOGLE_OAUTH_REDIRECT_URI:-http://localhost:5173/auth/callback}
+      GOOGLE_PUBLIC_OAUTH_REDIRECT_URI: ${GOOGLE_PUBLIC_OAUTH_REDIRECT_URI:-http://localhost:8000/api/accounts/google/public-redirect}
+      GMAIL_OAUTH_REDIRECT_URI: ${GMAIL_OAUTH_REDIRECT_URI:-http://localhost:8000/api/gmail/auth/callback/}
       BILLING_FAKE_MODE: ${BILLING_FAKE_MODE:-False}
       STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
     depends_on:
@@ -89,6 +92,9 @@ services:
       OLLAMA_KEEP_ALIVE: ${OLLAMA_KEEP_ALIVE:-10m}
       PURCHASE_SITE_URL: ${PURCHASE_SITE_URL:-http://localhost:5174}
       BIZGUARD_APP_URL: ${BIZGUARD_APP_URL:-http://localhost:5173}
+      GOOGLE_OAUTH_REDIRECT_URI: ${GOOGLE_OAUTH_REDIRECT_URI:-http://localhost:5173/auth/callback}
+      GOOGLE_PUBLIC_OAUTH_REDIRECT_URI: ${GOOGLE_PUBLIC_OAUTH_REDIRECT_URI:-http://localhost:8000/api/accounts/google/public-redirect}
+      GMAIL_OAUTH_REDIRECT_URI: ${GMAIL_OAUTH_REDIRECT_URI:-http://localhost:8000/api/gmail/auth/callback/}
       BILLING_FAKE_MODE: ${BILLING_FAKE_MODE:-False}
       STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
     depends_on:
@@ -123,6 +129,9 @@ services:
       OLLAMA_KEEP_ALIVE: ${OLLAMA_KEEP_ALIVE:-10m}
       PURCHASE_SITE_URL: ${PURCHASE_SITE_URL:-http://localhost:5174}
       BIZGUARD_APP_URL: ${BIZGUARD_APP_URL:-http://localhost:5173}
+      GOOGLE_OAUTH_REDIRECT_URI: ${GOOGLE_OAUTH_REDIRECT_URI:-http://localhost:5173/auth/callback}
+      GOOGLE_PUBLIC_OAUTH_REDIRECT_URI: ${GOOGLE_PUBLIC_OAUTH_REDIRECT_URI:-http://localhost:8000/api/accounts/google/public-redirect}
+      GMAIL_OAUTH_REDIRECT_URI: ${GMAIL_OAUTH_REDIRECT_URI:-http://localhost:8000/api/gmail/auth/callback/}
       BILLING_FAKE_MODE: ${BILLING_FAKE_MODE:-False}
       STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
     depends_on:
@@ -160,6 +169,9 @@ services:
       OLLAMA_KEEP_ALIVE: ${OLLAMA_KEEP_ALIVE:-10m}
       PURCHASE_SITE_URL: ${PURCHASE_SITE_URL:-http://localhost:5174}
       BIZGUARD_APP_URL: ${BIZGUARD_APP_URL:-http://localhost:5173}
+      GOOGLE_OAUTH_REDIRECT_URI: ${GOOGLE_OAUTH_REDIRECT_URI:-http://localhost:5173/auth/callback}
+      GOOGLE_PUBLIC_OAUTH_REDIRECT_URI: ${GOOGLE_PUBLIC_OAUTH_REDIRECT_URI:-http://localhost:8000/api/accounts/google/public-redirect}
+      GMAIL_OAUTH_REDIRECT_URI: ${GMAIL_OAUTH_REDIRECT_URI:-http://localhost:8000/api/gmail/auth/callback/}
       BILLING_FAKE_MODE: ${BILLING_FAKE_MODE:-False}
       STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
     depends_on:
