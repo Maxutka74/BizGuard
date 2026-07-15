@@ -3,6 +3,7 @@ from typing import List, Optional
 
 
 RISK_LEVELS = ("Safe", "Medium", "High", "Critical")
+BENIGN_EMAIL_CONTEXTS = {"receipt_or_invoice", "meeting_invite", "newsletter_or_info", "course_promo", "survey"}
 
 
 @dataclass
@@ -43,6 +44,8 @@ def compute_threat_result(
     attachment_score: int = 0,
     any_suspicious_attachment: bool = False,
     any_malicious_attachment: bool = False,
+    email_context: str | None = None,
+    explicit_security_intent: bool = False,
 ) -> ThreatResult:
     """
     Combine AI, domain, URL and attachment evidence.
@@ -79,9 +82,11 @@ def compute_threat_result(
     elif any_phishing_url:
         threat_score = max(threat_score, 55)
 
+    benign_context = email_context in BENIGN_EMAIL_CONTEXTS
+
     if any_malicious_attachment or attachment_score >= 75:
         threat_score = max(threat_score, 65)
-    elif any_suspicious_attachment or attachment_score >= 45:
+    elif not benign_context and (any_suspicious_attachment or attachment_score >= 45):
         threat_score = max(threat_score, 40)
 
     if credential_theft >= 70 and (urgency >= 50 or authority_impersonation >= 60):
@@ -100,6 +105,15 @@ def compute_threat_result(
     strong_file = any_malicious_attachment and attachment_score >= 80
     if strong_file or (strong_url and strong_ai):
         threat_score = max(threat_score, 82)
+
+
+    if benign_context and not explicit_security_intent:
+        has_severe_external_hit = any_malicious_url or any_phishing_url or any_malicious_attachment
+        has_strong_security_intent = credential_theft >= 40 or financial_fraud >= 45
+        has_strong_attachment = attachment_score >= 75 or any_malicious_attachment
+        has_strong_url = url_score >= 70 or any_malicious_url or any_phishing_url
+        if not (has_severe_external_hit or has_strong_security_intent or has_strong_attachment or has_strong_url):
+            threat_score = min(threat_score, 30)
 
     threat_score = clamp(threat_score)
     return ThreatResult(

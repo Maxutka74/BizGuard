@@ -51,10 +51,15 @@ TRACKING_PATH_PARTS = {
     "unsubscribe",
     "preferences",
     "mail_profile_preferences",
+    "email_marketing_click",
     "redirect",
     "/click/",
     "/track/",
+    "/photos/",
+    "/images/",
+    "/assets/",
 }
+MEDIA_PATH_EXTENSIONS = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".avif")
 SHORTENER_HOSTS = {
     "goo.gl",
     "bit.ly",
@@ -208,6 +213,8 @@ def _is_tracking_or_preference_url(url: str) -> bool:
     host = parts.netloc.lower()
     path = parts.path.lower()
     query = parts.query.lower()
+    if path.endswith(MEDIA_PATH_EXTENSIONS):
+        return True
     if any(part in host for part in TRACKING_HOST_PARTS):
         return True
     if any(part in path for part in TRACKING_PATH_PARTS):

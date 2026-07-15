@@ -17,6 +17,7 @@ from apps.gmail.services.gmail_fetcher import clean_email_text, fetch_inbox_mess
 from apps.gmail.services.attachment_analysis import _qr_findings
 from apps.gmail.services.ai_providers import (
     AIAnalysisTimedOut,
+    AIProviderUnavailable,
     FINAL_VERDICTS_BY_RISK,
     analyze_email_with_providers,
     _clamp_false_fear_from_disclaimer,
@@ -24,6 +25,9 @@ from apps.gmail.services.ai_providers import (
     _clamp_contextual_false_positive,
     EMAIL_CONTEXT_RECEIPT,
     EMAIL_CONTEXT_MEETING,
+    EMAIL_CONTEXT_NEWSLETTER,
+    EMAIL_CONTEXT_COURSE,
+    EMAIL_CONTEXT_SURVEY,
     email_context_for_analysis,
     sanitize_security_recommendations_for_risk,
     _sanitize_security_recommendations,
@@ -375,6 +379,87 @@ class OtpAndLanguageGuardTests(SimpleTestCase):
         self.assertLessEqual(result["authority_impersonation"], 25)
         self.assertLessEqual(result["urgency"], 25)
         self.assertLessEqual(result["fear"], 10)
+
+    def test_course_promo_is_not_otp_or_credential_theft(self):
+        body = (
+            'ITVDN Angular 21 course. Take your course access code and register for a free lesson. '
+            'This is a marketing newsletter for a programming course, not an account verification message.'
+        )
+        context = email_context_for_analysis('Angular 21 course access for 15 days', body)
+        self.assertEqual(context, EMAIL_CONTEXT_COURSE)
+        self.assertFalse(is_transactional_verification_email(
+            subject='Angular 21 course access for 15 days',
+            sender='info@itvdn.com',
+            domain='itvdn.com',
+            body=body,
+            url_scan_agg={'scanned_urls': [], 'scanned_attachments': [], 'url_score': 0},
+        ))
+
+        result = _clamp_contextual_false_positive(
+            {
+                'urgency': 100,
+                'fear': 40,
+                'credential_theft': 100,
+                'financial_fraud': 20,
+                'authority_impersonation': 90,
+            },
+            body,
+            {'url_score': 0, 'any_phishing': False, 'any_malicious': False, 'scanned_urls': [], 'scanned_attachments': []},
+        )
+        self.assertLessEqual(result['credential_theft'], 10)
+        self.assertLessEqual(result['urgency'], 20)
+        self.assertLessEqual(result['authority_impersonation'], 20)
+        self.assertLessEqual(result['fear'], 10)
+
+        recommendations = sanitize_security_recommendations_for_risk(
+            ['If you did not request this code, ignore this message.'],
+            'Medium',
+            {'scanned_urls': [], 'scanned_attachments': [], 'url_score': 0},
+            context,
+        )
+        joined = ' '.join(recommendations).lower()
+        self.assertNotIn('sms', joined)
+        self.assertNotIn('2fa', joined)
+        self.assertNotIn('password', joined)
+        self.assertNotIn('\u043a\u043e\u0434', joined)
+
+    def test_survey_tracking_urls_do_not_force_high_or_password_recommendations(self):
+        context = email_context_for_analysis(
+            'We have a quick question for you',
+            'Tell us what you would like to see when exploring crypto projects. Take the survey via newsletter redirect links.',
+        )
+        self.assertEqual(context, EMAIL_CONTEXT_SURVEY)
+        result = compute_threat_result(
+            ai_score=15,
+            domain_score=10,
+            url_score=45,
+            credential_theft=0,
+            urgency=10,
+            authority_impersonation=10,
+            any_phishing_url=False,
+            any_malicious_url=False,
+            email_context=context,
+            explicit_security_intent=False,
+        )
+        self.assertLessEqual(result.threat_score, 30)
+        self.assertEqual(result.risk_level, 'Safe')
+
+        recommendations = sanitize_security_recommendations_for_risk(
+            ['Do not enter password, SMS/2FA code, or payment data after following this email.'],
+            result.risk_level,
+            {
+                'scanned_urls': [{'url': 'https://newsletter.coingecko.com/email_marketing_click.html', 'score': 45, 'confidence': 'low'}],
+                'scanned_attachments': [],
+                'url_score': 45,
+            },
+            context,
+        )
+        joined = ' '.join(recommendations).lower()
+        self.assertNotIn('sms', joined)
+        self.assertNotIn('2fa', joined)
+        self.assertNotIn('password', joined)
+        self.assertIn('\u0434\u043e\u043c\u0435\u043d', joined)
+
     def test_receipt_is_not_otp_and_gets_receipt_recommendations(self):
         body = (
             "ФОП САВОНОВ ПАВЛО ВОЛОДИМИРОВИЧ МАГАЗИН Race Expert "
@@ -1241,6 +1326,21 @@ class AiQueueTimeoutTests(TestCase):
         self.assertEqual(apply_async_mock.call_args.kwargs["args"], [message.id])
         message.refresh_from_db()
         self.assertEqual(message.analysis_status, "processing")
+
+    @override_settings(AI_MESSAGE_TIME_BUDGET_SECONDS=30)
+    @patch("apps.gmail.services.sync.analyze_saved_email_message")
+    def test_provider_unavailable_completes_with_fallback_without_retry(self, analyze_mock):
+        message = self._message("provider-unavailable")
+        analyze_mock.side_effect = AIProviderUnavailable("ollama unavailable")
+
+        with patch.object(analyze_pending_email, "retry", side_effect=AssertionError("retry should not run")):
+            with patch.object(process_ai_queue, "apply_async") as apply_async_mock:
+                result = analyze_pending_email.run(message.id)
+
+        self.assertEqual(result["state"], "fallback_done")
+        message.refresh_from_db()
+        self.assertEqual(message.analysis_status, "done")
+        self.assertEqual(message.analysisSource, "AI unavailable")
 
     @override_settings(AI_MESSAGE_TIME_BUDGET_SECONDS=30)
     @patch("apps.gmail.services.sync.analyze_saved_email_message")

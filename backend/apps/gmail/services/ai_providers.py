@@ -46,9 +46,18 @@ FEAR_OR_LURE_RE = re.compile(
 EMAIL_CONTEXT_RECEIPT = "receipt_or_invoice"
 EMAIL_CONTEXT_MEETING = "meeting_invite"
 EMAIL_CONTEXT_NEWSLETTER = "newsletter_or_info"
+EMAIL_CONTEXT_COURSE = "course_promo"
+EMAIL_CONTEXT_SURVEY = "survey"
 EMAIL_CONTEXT_OTP = "otp_verification"
 EMAIL_CONTEXT_SECURITY = "security_action"
 EMAIL_CONTEXT_GENERAL = "general"
+BENIGN_EMAIL_CONTEXTS = {
+    EMAIL_CONTEXT_RECEIPT,
+    EMAIL_CONTEXT_MEETING,
+    EMAIL_CONTEXT_NEWSLETTER,
+    EMAIL_CONTEXT_COURSE,
+    EMAIL_CONTEXT_SURVEY,
+}
 
 RECEIPT_CONTEXT_RE = re.compile(
     r"(фіскальн(?:ий|ого)\s+чек|\bчек\s*[№#]|\bпрро\b|\bфоп\b|безготівков|\bгрн\b|"
@@ -67,6 +76,22 @@ NEWSLETTER_MARKET_CONTEXT_RE = re.compile(
     r"розсилка|відписат|новини|дослідження)",
     re.IGNORECASE | re.UNICODE,
 )
+COURSE_PROMO_CONTEXT_RE = re.compile(
+    r"(course|webinar|lesson|programming|frontend|backend|full[-\s]?stack|developer|angular|python|node|react|itvdn|"
+    r"promo\s*code|course\s*code|access\s*code|"
+    r"курс|вебінар|вебинар|занят|урок|програмув|фронтенд|бекенд|розроб|навчан|ментор|доступ\s+до\s+курсу|"
+    r"промокод|промо\s*код|код\s+курсу|код\s+доступу|пробн(?:ий|ого)\s+урок|реєстрац)",
+    re.IGNORECASE | re.UNICODE,
+)
+SURVEY_CONTEXT_RE = re.compile(
+    r"(survey|questionnaire|feedback|tell us what|your insights|quick question|help us build|"
+    r"опитуван|анкета|зворотн|відгук|дослідженн|коротк(?:е|е)\s+питання)",
+    re.IGNORECASE | re.UNICODE,
+)
+COURSE_CODE_CONTEXT_RE = re.compile(
+    r"(код\s+(?:курсу|доступу|знижк|промо)|промокод|промо\s*код|promo\s*code|course\s*code|access\s*code)",
+    re.IGNORECASE | re.UNICODE,
+)
 EXPLICIT_CREDENTIAL_OR_PAYMENT_REQUEST_RE = re.compile(
     r"((enter|submit|provide|verify|confirm|update|reset|recover|login|sign[\s-]?in).{0,80}"
     r"(password|passcode|2fa|mfa|sms|verification code|login|payment|card|billing|wallet seed|seed phrase|private key))|"
@@ -83,10 +108,19 @@ def _has_suspicious_evidence(url_scan_agg: Optional[dict]) -> bool:
     url_scan_agg = url_scan_agg or {}
     if url_scan_agg.get("any_phishing") or url_scan_agg.get("any_malicious"):
         return True
-    if int(url_scan_agg.get("url_score") or 0) >= 30:
+    if int(url_scan_agg.get("url_score") or 0) >= 70:
         return True
+    dangerous_findings = {
+        "dangerous_file_extension",
+        "high_risk_delivery_pdf",
+        "qr_contains_sensitive_url",
+        "pdf_contains_credential_or_payment_language",
+    }
     for item in url_scan_agg.get("scanned_attachments") or []:
-        if item.get("is_suspicious") or item.get("is_malicious") or int(item.get("score") or 0) >= 30:
+        local_findings = {str(f).lower() for f in (item.get("local_findings") or [])}
+        if item.get("is_malicious") or int(item.get("score") or 0) >= 70:
+            return True
+        if item.get("is_suspicious") and local_findings.intersection(dangerous_findings):
             return True
     return False
 
@@ -97,7 +131,11 @@ def email_context_for_analysis(subject: str, body: str, url_scan_agg: Optional[d
         return EMAIL_CONTEXT_SECURITY
     if RECEIPT_CONTEXT_RE.search(text):
         return EMAIL_CONTEXT_RECEIPT
-    if OTP_CODE_RE.search(text):
+    if COURSE_PROMO_CONTEXT_RE.search(text):
+        return EMAIL_CONTEXT_COURSE
+    if SURVEY_CONTEXT_RE.search(text):
+        return EMAIL_CONTEXT_SURVEY
+    if OTP_CODE_RE.search(text) and not COURSE_CODE_CONTEXT_RE.search(text):
         return EMAIL_CONTEXT_OTP
     if MEETING_CONTEXT_RE.search(text):
         return EMAIL_CONTEXT_MEETING
@@ -125,17 +163,29 @@ def _contextual_recommendations(email_context: str, risk_level: str, url_scan_ag
             "Перед відкриттям посилань звертайте увагу на домен у браузері, особливо після redirect-посилань.",
             "Якщо не підписувались на розсилку, скористайтесь офіційним способом відписки або заблокуйте відправника.",
         ]
+    if email_context == EMAIL_CONTEXT_COURSE:
+        return [
+            "Перевірте домен відправника перед реєстрацією або переглядом курсу.",
+            "Відкривайте курс вручну через офіційний сайт сервісу, особливо якщо посилання веде через redirect.",
+            "Якщо розсилка небажана, відпишіться через офіційний механізм сервісу або налаштування акаунта.",
+        ]
+    if email_context == EMAIL_CONTEXT_SURVEY:
+        return [
+            "Перевірте домен відправника та Reply-To перед участю в опитуванні.",
+            "Якщо посилання веде через tracking або redirect, відкрийте офіційний сайт сервісу вручну.",
+            "Не надавайте зайві персональні дані в опитуванні, якщо форма не належить офіційному домену сервісу.",
+        ]
     return []
 
 
 def _clamp_contextual_false_positive(result: Dict[str, Any], text: str, url_scan_agg: Optional[dict]) -> Dict[str, Any]:
     email_context = email_context_for_analysis("", text, url_scan_agg)
-    if email_context not in {EMAIL_CONTEXT_RECEIPT, EMAIL_CONTEXT_MEETING, EMAIL_CONTEXT_NEWSLETTER}:
+    if email_context not in BENIGN_EMAIL_CONTEXTS:
         return result
     if _has_suspicious_evidence(url_scan_agg) or EXPLICIT_CREDENTIAL_OR_PAYMENT_REQUEST_RE.search(text or ""):
         return result
 
-    result["credential_theft"] = min(int(result.get("credential_theft") or 0), 15)
+    result["credential_theft"] = min(int(result.get("credential_theft") or 0), 10)
     result["authority_impersonation"] = min(int(result.get("authority_impersonation") or 0), 20)
     result["urgency"] = min(int(result.get("urgency") or 0), 15)
     result["fear"] = min(int(result.get("fear") or 0), 10)
@@ -294,7 +344,7 @@ def _extract_json_object(text: str) -> str:
 
 
 def _ensure_ollama_model_ready(base_url: str, model: str, deadline: float | None = None) -> None:
-    global _OLLAMA_MODEL_READY_UNTIL
+    global _OLLAMA_DISABLED_UNTIL, _OLLAMA_MODEL_READY_UNTIL
     now = time.time()
     if now < _OLLAMA_MODEL_READY_UNTIL:
         return
@@ -305,11 +355,13 @@ def _ensure_ollama_model_ready(base_url: str, model: str, deadline: float | None
     except requests.Timeout as exc:
         raise AIAnalysisTimedOut("Ollama readiness check exceeded the per-email time budget.") from exc
     except Exception as exc:
+        _OLLAMA_DISABLED_UNTIL = time.time() + int(os.environ.get("OLLAMA_DISABLE_ON_ERROR_SECONDS", "120"))
         raise AIProviderUnavailable(f"Ollama readiness check failed: {exc}") from exc
 
     names = {str(item.get("name", "")) for item in models}
     accepted_names = {model, f"{model}:latest"}
     if not names.intersection(accepted_names):
+        _OLLAMA_DISABLED_UNTIL = time.time() + int(os.environ.get("OLLAMA_DISABLE_ON_ERROR_SECONDS", "120"))
         raise AIProviderUnavailable(f"Ollama model '{model}' is not loaded. Run ollama pull {model}.")
     _OLLAMA_MODEL_READY_UNTIL = now + int(os.environ.get("OLLAMA_MODEL_CHECK_SECONDS", "60"))
 
@@ -629,7 +681,7 @@ def security_recommendations_for_risk(
     recommendations: list[str] = []
 
     if (
-        email_context in {EMAIL_CONTEXT_RECEIPT, EMAIL_CONTEXT_MEETING, EMAIL_CONTEXT_NEWSLETTER}
+        email_context in BENIGN_EMAIL_CONTEXTS
         and risk_level in {"Safe", "Medium"}
         and not _has_suspicious_evidence(url_scan_agg)
     ):
@@ -669,7 +721,7 @@ def security_recommendations_for_risk(
 def _recommendation_mentions_absent_evidence(text: str, evidence: dict[str, bool], email_context: str | None) -> bool:
     lowered = (text or "").lower()
     credential_context = email_context in {EMAIL_CONTEXT_SECURITY, EMAIL_CONTEXT_OTP} or evidence.get("credential_or_payment")
-    if not credential_context and re.search(r"(парол|sms|2fa|mfa|код\s+підтвердж|одноразовий\s+код|verification\s+code|password)", lowered, re.I | re.U):
+    if not credential_context and re.search(r"(парол|sms|2fa|mfa|код\s+підтвердж|одноразовий\s+код|verification\s+code|password|payment|card|billing|платіж|картк)", lowered, re.I | re.U):
         return True
     if not evidence.get("has_urls") and re.search(r"(посилан|лінк|url|link)", lowered, re.I | re.U):
         return True

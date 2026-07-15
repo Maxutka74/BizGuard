@@ -5,6 +5,7 @@ from rest_framework import serializers
 
 from apps.gmail.models import EmailAccount, EmailMessage, TrustedSenderRule
 from apps.gmail.services.ai_providers import (
+    email_context_for_analysis,
     final_summary_for_risk,
     sanitize_security_recommendations_for_risk,
 )
@@ -110,13 +111,18 @@ class EmailDetailSerializer(serializers.ModelSerializer):
         if obj.analysis_status != "done":
             return []
         recommendations = obj.recommendations if isinstance(obj.recommendations, list) else []
+        url_context = {
+            "scanned_urls": obj.scannedUrls or [],
+            "scanned_attachments": obj.scannedAttachments or [],
+            "url_score": obj.urlScore,
+            "any_phishing": obj.hasPhishingUrl,
+            "any_malicious": obj.hasMaliciousUrl,
+        }
         return sanitize_security_recommendations_for_risk(
             recommendations,
             obj.riskLevel,
-            {
-                "scanned_urls": obj.scannedUrls or [],
-                "scanned_attachments": obj.scannedAttachments or [],
-            },
+            url_context,
+            email_context_for_analysis(obj.subject, obj.body, url_context),
         )
 
 

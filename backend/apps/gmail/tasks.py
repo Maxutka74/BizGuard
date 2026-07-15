@@ -1,4 +1,4 @@
-﻿"""
+"""
 apps/gmail/tasks.py
 
 Celery tasks for async Gmail operations.
@@ -84,6 +84,7 @@ try:
         from django.core.cache import cache
 
         from apps.gmail.models import EmailMessage
+        from apps.gmail.services.ai_providers import AIProviderUnavailable
         from apps.gmail.services.queue import enqueue_ai_queue
         from apps.gmail.services.sync import (
             ANALYSIS_VERSION,
@@ -134,6 +135,16 @@ try:
                     .first()
                 )
                 if not message:
+                    existing_meta = EmailMessage.objects.filter(pk=message_id).values("account_id", "analysis_status").first()
+                    if existing_meta:
+                        account_id = existing_meta["account_id"]
+                        if existing_meta["analysis_status"] != "done":
+                            EmailMessage.objects.filter(pk=message_id).update(
+                                analysis_status="pending_ai",
+                                analysisSource="AI pending",
+                                analysis_done=False,
+                            )
+                        return {"state": "db_locked", "message_id": message_id, "account_id": account_id}
                     return {"state": "missing", "message_id": message_id}
                 account_id = message.account_id
                 if message.analysis_status == "done":
@@ -176,6 +187,8 @@ try:
                     return complete_with_fallback(f"Reputation evidence remained pending: {exc}")
                 mark_pending("Waiting for reputation")
                 return {"state": "deferred", "reason": "pending_reputation", "message_id": message_id, "account_id": account_id}
+            except AIProviderUnavailable as exc:
+                return complete_with_fallback(f"AI provider unavailable: {exc}")
             except AIAnalysisTimedOut as exc:
                 if final_attempt or attempts >= 2:
                     return complete_with_fallback(f"AI analysis timed out: {exc}")

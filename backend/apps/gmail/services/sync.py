@@ -301,17 +301,19 @@ def _needs_deep_analysis_before_vt(
     attachment_scan_agg: dict,
 ) -> bool:
     text = f"{msg.get('subject', '')}\n{msg.get('body', '')}"
+    email_context = email_context_for_analysis(msg.get("subject", ""), msg.get("body", ""), None)
+    benign_context = email_context in {"receipt_or_invoice", "meeting_invite", "newsletter_or_info", "course_promo", "survey"}
     if HIGH_RISK_INTENT_RE.search(text) and not _is_trusted_newsletter_context(msg, msg.get("domain", "")):
         return True
     if security_result["headerScore"] > 0:
         return True
-    if security_result["linkScore"] >= 25 and not _is_trusted_newsletter_context(msg, msg.get("domain", "")):
+    if security_result["linkScore"] >= 25 and not benign_context and not _is_trusted_newsletter_context(msg, msg.get("domain", "")):
         return True
-    if security_result.get("attachmentScore", 0) >= 30:
+    if security_result.get("attachmentScore", 0) >= (75 if benign_context else 30):
         return True
     if domain_result.get("domainReputation") != "Trusted" or domain_result.get("domainScore", 0) >= 30:
         return True
-    if attachment_scan_agg.get("attachment_score", 0) > 0:
+    if attachment_scan_agg.get("attachment_score", 0) >= (75 if benign_context else 1):
         return True
     return False
 
@@ -399,6 +401,7 @@ def _fast_safe_analysis(
         return None
 
 
+    email_context = email_context_for_analysis(subject, msg.get("body", ""), url_scan_agg)
     threat = compute_threat_result(
         ai_score=8,
         domain_score=domain_result.get("domainScore", 0),
@@ -407,6 +410,8 @@ def _fast_safe_analysis(
         attachment_score=attachment_scan_agg.get("attachment_score", 0),
         any_phishing_url=False,
         any_malicious_url=False,
+        email_context=email_context,
+        explicit_security_intent=email_context == "security_action",
     )
     return {
         "urgency": 0,
@@ -782,6 +787,8 @@ def _complete_message_analysis(
         financial_fraud=ai_result.get("financial_fraud", 0),
         authority_impersonation=ai_result.get("authority_impersonation", 0),
     )
+    url_context = _url_scan_agg_from_message(message)
+    email_context = email_context_for_analysis(message.subject, message.body, url_context)
     threat = compute_threat_result(
         ai_score=ai_result.get("ai_score", 0),
         domain_score=message.domainScore,
@@ -797,6 +804,8 @@ def _complete_message_analysis(
         attachment_score=message.attachmentScore,
         any_suspicious_attachment=any(item.get("is_suspicious") for item in (message.scannedAttachments or [])),
         any_malicious_attachment=any(item.get("is_malicious") for item in (message.scannedAttachments or [])),
+        email_context=email_context,
+        explicit_security_intent=email_context == "security_action",
     )
 
     final_verdict = _final_verdict_for_risk(threat.risk_level)
@@ -807,12 +816,11 @@ def _complete_message_analysis(
     message.authorityImpersonation = ai_result.get("authority_impersonation", 0)
     message.aiSummary = _final_summary_for_risk(ai_result.get("ai_summary", ""), threat.risk_level)
     message.verdict = final_verdict
-    url_context = _url_scan_agg_from_message(message)
     message.recommendations = sanitize_security_recommendations_for_risk(
         ai_result.get("recommendations", []),
         threat.risk_level,
         url_context,
-        email_context_for_analysis(message.subject, message.body, url_context),
+        email_context,
     )
     message.aiScore = ai_result.get("ai_score", 0)
     message.threatScore = threat.threat_score
@@ -912,13 +920,22 @@ def _message_sender_is_allowlisted(message: EmailMessage) -> bool:
 
 
 def _should_run_detailed_after_ai(message: EmailMessage, ai_result: dict) -> bool:
+    url_context = _url_scan_agg_from_message(message)
+    email_context = email_context_for_analysis(message.subject, message.body, url_context)
+    benign_context = email_context in {"receipt_or_invoice", "meeting_invite", "newsletter_or_info", "course_promo", "survey"}
+
     if message.domainReputation != "Trusted" or message.domainScore >= 30:
         return True
-    if message.headerScore > 0 or message.linkScore >= 25 or message.attachmentScore >= 30:
+    if message.headerScore > 0:
         return True
-    if ai_result.get("ai_score", 0) >= 31:
+    if benign_context:
+        if message.hasPhishingUrl or message.hasMaliciousUrl or message.linkScore >= 70 or message.attachmentScore >= 75:
+            return True
+    elif message.linkScore >= 25 or message.attachmentScore >= 30:
         return True
     if ai_result.get("credential_theft", 0) >= 40 or ai_result.get("financial_fraud", 0) >= 40:
+        return True
+    if not benign_context and ai_result.get("ai_score", 0) >= 31:
         return True
     if ai_result.get("urgency", 0) >= 60 and ai_result.get("authority_impersonation", 0) >= 40:
         return True

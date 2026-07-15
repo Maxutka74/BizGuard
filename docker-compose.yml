@@ -142,7 +142,6 @@ services:
 
   celery_ai_worker:
     build: ./backend
-    profiles: ["local-ai"]
     command: celery -A config worker --loglevel=info --queues=ai --concurrency=${CELERY_AI_WORKER_CONCURRENCY:-2} --prefetch-multiplier=1
     volumes:
       - ./backend:/app
@@ -179,8 +178,6 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-      ollama_pull:
-        condition: service_completed_successfully
 
   ollama:
     image: ollama/ollama:latest
