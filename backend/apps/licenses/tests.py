@@ -220,7 +220,7 @@ class LicenseApiTests(TestCase):
     @patch("apps.accounts.views.get_or_create_user_from_google")
     @patch("apps.accounts.views.fetch_google_userinfo")
     @patch("apps.accounts.views.exchange_code_for_tokens")
-    def test_google_callback_blocks_new_user_when_key_is_full(
+    def test_google_callback_allows_new_user_to_login_before_license_activation(
         self,
         token_mock,
         userinfo_mock,
@@ -242,8 +242,9 @@ class LicenseApiTests(TestCase):
             format="json",
         )
 
-        self.assertEqual(response.status_code, 400)
-        self.assertEqual(response.data["code"], "activation_limit_reached")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["user"]["license"]["status"], "missing")
+        self.assertEqual(license_key.activation_count, 1)
 
     def test_me_returns_license_status_without_active_license(self):
         self._authenticate()
@@ -355,11 +356,35 @@ class LicenseApiTests(TestCase):
         delay_mock.assert_called_once()
         self.assertEqual(delay_mock.call_args.args, (account.id, 15, 7, False, True))
 
-    def test_google_callback_refuses_missing_gate_token(self):
-        response = self.client.post(
-            "/api/accounts/google/callback",
-            {"code": "dummy", "redirect_uri": "http://localhost:5173/auth/callback"},
-            format="json",
+
+    @patch("apps.accounts.google_oauth._trigger_initial_scan")
+    def test_activate_endpoint_queues_initial_scan_after_google_login(self, scan_mock):
+        plaintext, _ = create_license_key(LicensePlan.FREE_1_DAY)
+        EmailAccount.objects.create(
+            user=self.user,
+            email=self.user.email,
+            access_token="access",
+            refresh_token="refresh",
+            is_active=True,
         )
+        self._authenticate()
+
+        response = self.client.post("/api/licenses/activate", {"key": plaintext}, format="json")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["license"]["status"], "active")
+        scan_mock.assert_called_once()
+
+    def test_same_email_expired_same_key_gets_buy_new_key_error(self):
+        plaintext, _ = create_license_key(LicensePlan.FREE_1_DAY)
+        activation = activate_license_for_user(self.user, validate_license_key(plaintext))
+        activation.expires_at = timezone.now() - timedelta(seconds=1)
+        activation.save(update_fields=["expires_at"])
+        self._authenticate()
+
+        response = self.client.post("/api/licenses/activate", {"key": plaintext}, format="json")
 
         self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data["code"], "expired_license")
+        self.assertIn("Купіть новий ключ", response.data["detail"])
+

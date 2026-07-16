@@ -40,7 +40,7 @@ class GoogleAuthCallbackSerializer(serializers.Serializer):
     """Payload sent by BizGuard app after Google OAuth redirect/callback."""
     code = serializers.CharField()
     redirect_uri = serializers.CharField(required=False)
-    license_gate_token = serializers.CharField()
+    license_gate_token = serializers.CharField(required=False, allow_blank=True)
 
 
 class GooglePublicAuthCallbackSerializer(serializers.Serializer):

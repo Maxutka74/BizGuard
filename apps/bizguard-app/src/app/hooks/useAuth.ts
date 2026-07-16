@@ -2,10 +2,9 @@ import { useState, useEffect, useCallback } from "react";
 import { fetchMe, getGoogleAuthUrl, logout, type User } from "../../api/auth";
 import { LICENSE_REQUIRED_EVENT, tokenStorage } from "../../api/client";
 import {
+  activateLicenseKey,
   confirmLicenseKey,
   hasActiveLicense,
-  validateLicenseKey,
-  type LicenseGateValidation,
   type LicenseStatus,
 } from "../../api/licenses";
 
@@ -15,12 +14,27 @@ function stateForUser(user: User): AuthState {
   return hasActiveLicense(user.license) ? "authenticated" : "needs_license";
 }
 
+function userMessageFromError(err: unknown): string {
+  const code = (err as { code?: string })?.code;
+  const detail = (err as { detail?: string })?.detail;
+  if (code === "expired_license") {
+    return "Строк дії цього ключа для вашого email завершився. Купіть новий ключ на сайті покупки.";
+  }
+  if (code === "activation_limit_reached") {
+    return "Ліміт активацій цього ключа вичерпано. Увійдіть email, який уже активував ключ, або купіть більше місць.";
+  }
+  if (code === "key_already_used") {
+    return "Цей ключ уже використовувався для іншої активації. Перевірте email або купіть новий ключ.";
+  }
+  return detail ?? "Не вдалося обробити ліцензійний ключ.";
+}
+
 export function useAuth() {
   const [state, setState] = useState<AuthState>("loading");
   const [user, setUser] = useState<User | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [licenseError, setLicenseError] = useState<string | null>(null);
-  const [licenseGate, setLicenseGate] = useState<LicenseGateValidation | null>(null);
+  const [authBusy, setAuthBusy] = useState(false);
   const [licenseBusy, setLicenseBusy] = useState(false);
 
   useEffect(() => {
@@ -47,7 +61,7 @@ export function useAuth() {
       setLicenseError(
         license?.status === "confirmation_required"
           ? "Потрібно щомісячне підтвердження ключа. Введіть той самий ліцензійний ключ, щоб продовжити."
-          : "Ліцензія відсутня або прострочена. Введіть активний ключ, щоб продовжити."
+          : "Ліцензія відсутня або строк дії завершився. Введіть активний ключ для цього email."
       );
       setState("needs_license");
     };
@@ -56,64 +70,38 @@ export function useAuth() {
     return () => window.removeEventListener(LICENSE_REQUIRED_EVENT, handleLicenseRequired);
   }, []);
 
-  const handleValidateLicenseKey = useCallback(async (key: string) => {
-    setLicenseBusy(true);
-    setLicenseError(null);
-    try {
-      const validation = await validateLicenseKey(key);
-      setLicenseGate(validation);
-      return validation;
-    } catch (err: unknown) {
-      const msg = (err as { detail?: string })?.detail ?? "Ліцензійний ключ недійсний.";
-      setLicenseGate(null);
-      setLicenseError(msg);
-      throw err;
-    } finally {
-      setLicenseBusy(false);
-    }
-  }, []);
-
   const handleLogin = useCallback(async () => {
+    setAuthBusy(true);
     setError(null);
     setLicenseError(null);
     try {
-      if (!licenseGate?.gateToken) {
-        setLicenseError("Спочатку введіть і перевірте ліцензійний ключ.");
-        return;
-      }
-      const url = await getGoogleAuthUrl(licenseGate.gateToken);
+      const url = await getGoogleAuthUrl();
       window.location.href = url;
     } catch (err: unknown) {
       const msg = (err as { detail?: string })?.detail ?? "Не вдалося почати вхід через Google.";
       setError(msg);
+    } finally {
+      setAuthBusy(false);
     }
-  }, [licenseGate]);
+  }, []);
 
   const handleActivateLicenseKey = useCallback(async (key: string) => {
     setLicenseBusy(true);
     setLicenseError(null);
     try {
       const shouldConfirm = user?.license?.status === "confirmation_required";
-      if (shouldConfirm) {
-        const license = await confirmLicenseKey(key);
-        const refreshed = await fetchMe().catch(() => null);
-        if (refreshed) {
-          setUser(refreshed);
-          setState(stateForUser(refreshed));
-        } else {
-          setUser((current) => (current ? { ...current, license } : current));
-          setState(hasActiveLicense(license) ? "authenticated" : "needs_license");
-        }
-        return license;
+      const license = shouldConfirm ? await confirmLicenseKey(key) : await activateLicenseKey(key);
+      const refreshed = await fetchMe().catch(() => null);
+      if (refreshed) {
+        setUser(refreshed);
+        setState(stateForUser(refreshed));
+      } else {
+        setUser((current) => (current ? { ...current, license } : current));
+        setState(hasActiveLicense(license) ? "authenticated" : "needs_license");
       }
-
-      const validation = await validateLicenseKey(key);
-      const url = await getGoogleAuthUrl(validation.gateToken);
-      setState("authenticating");
-      window.location.href = url;
-      return undefined;
+      return license;
     } catch (err: unknown) {
-      const msg = (err as { detail?: string })?.detail ?? "Не вдалося обробити цей ліцензійний ключ.";
+      const msg = userMessageFromError(err);
       setLicenseError(msg);
       throw err;
     } finally {
@@ -124,8 +112,8 @@ export function useAuth() {
   const handleLogout = useCallback(async () => {
     await logout().catch(() => {});
     setUser(null);
-    setLicenseGate(null);
     setLicenseError(null);
+    setError(null);
     setState("unauthenticated");
   }, []);
 
@@ -139,11 +127,10 @@ export function useAuth() {
     user,
     error,
     licenseError,
-    licenseGate,
     licenseBusy,
+    authBusy,
     isLoading: state === "loading" || state === "authenticating",
     isAuthenticated: state === "authenticated",
-    handleValidateLicenseKey,
     handleActivateLicenseKey,
     handleLogin,
     handleLogout,

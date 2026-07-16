@@ -23,9 +23,8 @@ export default function App() {
     user,
     error,
     licenseError,
-    licenseGate,
     licenseBusy,
-    handleValidateLicenseKey,
+    authBusy,
     handleActivateLicenseKey,
     handleLogin,
     handleLogout,
@@ -76,11 +75,9 @@ export default function App() {
   if (state === "unauthenticated") {
     return (
       <LoginPage
-        onValidateLicenseKey={handleValidateLicenseKey}
         onLogin={handleLogin}
-        licenseGate={licenseGate}
-        isBusy={licenseBusy}
-        errorMessage={licenseError ?? error ?? undefined}
+        isBusy={authBusy}
+        errorMessage={error ?? undefined}
       />
     );
   }

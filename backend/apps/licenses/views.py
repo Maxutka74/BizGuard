@@ -65,6 +65,7 @@ class ActivateLicenseView(APIView):
         try:
             license_key = validate_license_key(serializer.validated_data["key"], require_capacity=False)
             activate_license_for_user(request.user, license_key)
+            _queue_initial_scan_for_user(request.user)
         except LicenseServiceError as exc:
             return _license_error_response(exc, status.HTTP_400_BAD_REQUEST)
 
@@ -95,3 +96,17 @@ def _license_error_response(exc: LicenseServiceError, response_status: int):
         },
         status=response_status,
     )
+
+
+
+def _queue_initial_scan_for_user(user):
+    try:
+        from apps.accounts.google_oauth import _trigger_initial_scan
+        from apps.gmail.models import EmailAccount
+
+        account = EmailAccount.objects.filter(user=user, is_active=True).first()
+        if account:
+            _trigger_initial_scan(account)
+    except Exception:
+        # Activation must not fail just because scan scheduling failed.
+        pass

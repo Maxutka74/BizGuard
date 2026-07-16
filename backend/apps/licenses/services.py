@@ -177,9 +177,14 @@ def activate_license_for_user(user, license_key: LicenseKey) -> LicenseActivatio
                 "confirmation_required",
                 "Цей ліцензійний ключ потрібно підтвердити для цього акаунта.",
             )
+        if existing.revoked:
+            raise LicenseServiceError(
+                "revoked_license",
+                "Цю активацію ліцензії відкликано. Купіть або введіть новий ключ.",
+            )
         raise LicenseServiceError(
-            "key_already_used",
-            "Цей ліцензійний ключ уже використовувався цим акаунтом.",
+            "expired_license",
+            "Термін дії цього ключа для вашого email завершився. Купіть новий ключ на сайті покупки.",
         )
 
     with transaction.atomic():

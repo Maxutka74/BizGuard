@@ -24,11 +24,6 @@ from .google_oauth import (
 )
 from .cookies import REFRESH_COOKIE, clear_auth_cookies, set_auth_cookies
 from .serializers import UserSerializer, GoogleAuthCallbackSerializer, GooglePublicAuthCallbackSerializer
-from apps.licenses.services import (
-    LicenseServiceError,
-    activate_license_for_user,
-    validate_gate_token,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -54,11 +49,6 @@ class GoogleAuthURLView(APIView):
     throttle_scope = "google_auth_url"
 
     def get(self, request):
-        try:
-            validate_gate_token(request.query_params.get("license_gate_token"))
-        except LicenseServiceError as e:
-            return Response({"detail": e.detail, "code": e.code}, status=400)
-
         redirect_uri = request.query_params.get("redirect_uri", settings.GOOGLE_OAUTH_REDIRECT_URI)
         if not _is_allowed_redirect_uri(redirect_uri):
             return Response({"detail": "Недозволений Google OAuth redirect_uri."}, status=400)
@@ -192,27 +182,11 @@ class GoogleAuthCallbackView(APIView):
             return Response({"detail": "Недозволений Google OAuth redirect_uri."}, status=400)
 
         try:
-            license_key = validate_gate_token(serializer.validated_data["license_gate_token"])
-        except LicenseServiceError as e:
-            return Response({"detail": e.detail, "code": e.code}, status=400)
-
-        try:
             token_data = exchange_code_for_tokens(code, redirect_uri)
             userinfo = fetch_google_userinfo(token_data["access_token"])
             user = get_or_create_user_from_google(token_data, userinfo, trigger_initial_scan=False)
-            activate_license_for_user(user, license_key)
-            try:
-                from apps.gmail.models import EmailAccount
-
-                account = EmailAccount.objects.filter(user=user, is_active=True).first()
-                if account:
-                    _trigger_initial_scan(account)
-            except Exception:
-                logger.exception("Could not queue initial licensed scan")
         except GoogleOAuthError as e:
             return Response({"detail": str(e), "code": "google_oauth_failed"}, status=400)
-        except LicenseServiceError as e:
-            return Response({"detail": e.detail, "code": e.code}, status=400)
         except Exception as e:
             logger.exception("Google OAuth callback failed")
             return Response(

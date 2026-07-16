@@ -1,3 +1,4 @@
+from unittest.mock import patch
 from django.test import TestCase
 from rest_framework.test import APIClient
 from rest_framework_simplejwt.tokens import RefreshToken
@@ -5,7 +6,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from apps.accounts.cookies import ACCESS_COOKIE, REFRESH_COOKIE
 from apps.accounts.models import User
 from apps.licenses.models import LicensePlan
-from apps.licenses.services import create_gate_token, create_license_key
+from apps.licenses.services import create_license_key
 
 
 class CookieAuthTests(TestCase):
@@ -43,18 +44,15 @@ class CookieAuthTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["email"], self.user.email)
 
-    def test_google_auth_url_forces_account_selection(self):
-        _, license_key = create_license_key(LicensePlan.FREE_1_DAY)
+    def test_google_auth_url_forces_account_selection_without_license_gate(self):
         response = self.client.get(
             "/api/accounts/google/url",
-            {
-                "license_gate_token": create_gate_token(license_key),
-                "redirect_uri": "http://localhost:5173/auth/callback",
-            },
+            {"redirect_uri": "http://localhost:5173/auth/callback"},
         )
 
         self.assertEqual(response.status_code, 200)
         self.assertIn("prompt=select_account+consent", response.data["url"])
+        self.assertIn("gmail.modify", response.data["url"])
 
     def test_public_google_auth_url_uses_profile_scopes_only(self):
         response = self.client.get(
@@ -81,11 +79,35 @@ class CookieAuthTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("scope=openid+email+profile", response.data["url"])
 
-    def test_bizguard_google_auth_url_still_requires_gate_token(self):
+    def test_bizguard_google_auth_url_allows_email_first_login(self):
         response = self.client.get(
             "/api/accounts/google/url",
             {"redirect_uri": "http://localhost:5173/auth/callback"},
         )
 
-        self.assertEqual(response.status_code, 400)
-        self.assertEqual(response.data["code"], "missing_gate_token")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("gmail.modify", response.data["url"])
+
+
+class GoogleEmailFirstLoginTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+
+    @patch("apps.accounts.views.get_or_create_user_from_google")
+    @patch("apps.accounts.views.fetch_google_userinfo")
+    @patch("apps.accounts.views.exchange_code_for_tokens")
+    def test_google_callback_allows_login_without_license_gate(self, token_mock, userinfo_mock, get_user_mock):
+        user = User.objects.create(email="email-first@example.com")
+        token_mock.return_value = {"access_token": "google-access"}
+        userinfo_mock.return_value = {"email": user.email}
+        get_user_mock.return_value = user
+
+        response = self.client.post(
+            "/api/accounts/google/callback",
+            {"code": "dummy", "redirect_uri": "http://localhost:5173/auth/callback"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["user"]["email"], user.email)
+        self.assertEqual(response.data["user"]["license"]["status"], "missing")
