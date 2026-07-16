@@ -3,7 +3,7 @@ from typing import List, Optional
 
 
 RISK_LEVELS = ("Safe", "Medium", "High", "Critical")
-BENIGN_EMAIL_CONTEXTS = {"receipt_or_invoice", "meeting_invite", "newsletter_or_info", "course_promo", "survey"}
+BENIGN_EMAIL_CONTEXTS = {"receipt_or_invoice", "meeting_invite", "newsletter_or_info", "course_promo", "survey", "service_setup"}
 
 
 @dataclass

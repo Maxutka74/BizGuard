@@ -28,6 +28,7 @@ from apps.gmail.services.ai_providers import (
     EMAIL_CONTEXT_NEWSLETTER,
     EMAIL_CONTEXT_COURSE,
     EMAIL_CONTEXT_SURVEY,
+    EMAIL_CONTEXT_SERVICE_SETUP,
     email_context_for_analysis,
     sanitize_security_recommendations_for_risk,
     _sanitize_security_recommendations,
@@ -459,6 +460,48 @@ class OtpAndLanguageGuardTests(SimpleTestCase):
         self.assertNotIn('2fa', joined)
         self.assertNotIn('password', joined)
         self.assertIn('\u0434\u043e\u043c\u0435\u043d', joined)
+
+
+    def test_stripe_setup_guide_gets_contextual_recommendations(self):
+        body = (
+            "Start building on Stripe. Welcome to Stripe. Visit the Dashboard and create your custom setup guide. "
+            "You can test in a sandbox, configure your business profile, payment links and integration. "
+            "Unsubscribe or manage email preferences. https://info-link.stripe.com/setup-guide"
+        )
+        url_context = {
+            "scanned_urls": [
+                {"url": "https://info-link.stripe.com/setup-guide", "score": 0, "confidence": "low"}
+            ],
+            "url_score": 0,
+            "scanned_attachments": [],
+        }
+
+        context = email_context_for_analysis("Your Stripe setup guide", body, url_context)
+        self.assertEqual(context, EMAIL_CONTEXT_SERVICE_SETUP)
+
+        result = compute_threat_result(
+            ai_score=22,
+            domain_score=10,
+            url_score=45,
+            attachment_score=0,
+            email_context=context,
+            explicit_security_intent=False,
+        )
+        self.assertLessEqual(result.threat_score, 30)
+        self.assertIn(result.risk_level, {"Safe", "Medium"})
+
+        recommendations = sanitize_security_recommendations_for_risk(
+            ["Не вводьте SMS/2FA-код або пароль після переходу з цього листа."],
+            result.risk_level,
+            url_context,
+            context,
+        )
+        joined = " ".join(recommendations).lower()
+        self.assertNotIn("sms", joined)
+        self.assertNotIn("2fa", joined)
+        self.assertNotIn("парол", joined)
+        self.assertIn("dashboard", joined)
+        self.assertIn("домен", joined)
 
     def test_receipt_is_not_otp_and_gets_receipt_recommendations(self):
         body = (

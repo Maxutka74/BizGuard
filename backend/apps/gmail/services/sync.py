@@ -302,7 +302,7 @@ def _needs_deep_analysis_before_vt(
 ) -> bool:
     text = f"{msg.get('subject', '')}\n{msg.get('body', '')}"
     email_context = email_context_for_analysis(msg.get("subject", ""), msg.get("body", ""), None)
-    benign_context = email_context in {"receipt_or_invoice", "meeting_invite", "newsletter_or_info", "course_promo", "survey"}
+    benign_context = email_context in {"receipt_or_invoice", "meeting_invite", "newsletter_or_info", "course_promo", "survey", "service_setup"}
     if HIGH_RISK_INTENT_RE.search(text) and not _is_trusted_newsletter_context(msg, msg.get("domain", "")):
         return True
     if security_result["headerScore"] > 0:
@@ -922,7 +922,7 @@ def _message_sender_is_allowlisted(message: EmailMessage) -> bool:
 def _should_run_detailed_after_ai(message: EmailMessage, ai_result: dict) -> bool:
     url_context = _url_scan_agg_from_message(message)
     email_context = email_context_for_analysis(message.subject, message.body, url_context)
-    benign_context = email_context in {"receipt_or_invoice", "meeting_invite", "newsletter_or_info", "course_promo", "survey"}
+    benign_context = email_context in {"receipt_or_invoice", "meeting_invite", "newsletter_or_info", "course_promo", "survey", "service_setup"}
 
     if message.domainReputation != "Trusted" or message.domainScore >= 30:
         return True

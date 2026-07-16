@@ -48,6 +48,7 @@ EMAIL_CONTEXT_MEETING = "meeting_invite"
 EMAIL_CONTEXT_NEWSLETTER = "newsletter_or_info"
 EMAIL_CONTEXT_COURSE = "course_promo"
 EMAIL_CONTEXT_SURVEY = "survey"
+EMAIL_CONTEXT_SERVICE_SETUP = "service_setup"
 EMAIL_CONTEXT_OTP = "otp_verification"
 EMAIL_CONTEXT_SECURITY = "security_action"
 EMAIL_CONTEXT_GENERAL = "general"
@@ -57,6 +58,7 @@ BENIGN_EMAIL_CONTEXTS = {
     EMAIL_CONTEXT_NEWSLETTER,
     EMAIL_CONTEXT_COURSE,
     EMAIL_CONTEXT_SURVEY,
+    EMAIL_CONTEXT_SERVICE_SETUP,
 }
 
 RECEIPT_CONTEXT_RE = re.compile(
@@ -86,6 +88,12 @@ COURSE_PROMO_CONTEXT_RE = re.compile(
 SURVEY_CONTEXT_RE = re.compile(
     r"(survey|questionnaire|feedback|tell us what|your insights|quick question|help us build|"
     r"опитуван|анкета|зворотн|відгук|дослідженн|коротк(?:е|е)\s+питання)",
+    re.IGNORECASE | re.UNICODE,
+)
+SERVICE_SETUP_CONTEXT_RE = re.compile(
+    r"(stripe|dashboard|setup guide|start building|business profile|accepting payments|payment links|"
+    r"sandbox|test environment|go live|developer dashboard|integration guide|onboarding|custom setup guide|"
+    r"налаштув|профіль\s+бізнесу|платіжн(?:ий|і)|інтеграц)",
     re.IGNORECASE | re.UNICODE,
 )
 COURSE_CODE_CONTEXT_RE = re.compile(
@@ -135,6 +143,8 @@ def email_context_for_analysis(subject: str, body: str, url_scan_agg: Optional[d
         return EMAIL_CONTEXT_COURSE
     if SURVEY_CONTEXT_RE.search(text):
         return EMAIL_CONTEXT_SURVEY
+    if SERVICE_SETUP_CONTEXT_RE.search(text):
+        return EMAIL_CONTEXT_SERVICE_SETUP
     if OTP_CODE_RE.search(text) and not COURSE_CODE_CONTEXT_RE.search(text):
         return EMAIL_CONTEXT_OTP
     if MEETING_CONTEXT_RE.search(text):
@@ -174,6 +184,13 @@ def _contextual_recommendations(email_context: str, risk_level: str, url_scan_ag
             "Перевірте домен відправника та Reply-To перед участю в опитуванні.",
             "Якщо посилання веде через tracking або redirect, відкрийте офіційний сайт сервісу вручну.",
             "Не надавайте зайві персональні дані в опитуванні, якщо форма не належить офіційному домену сервісу.",
+        ]
+    if email_context == EMAIL_CONTEXT_SERVICE_SETUP:
+        return [
+            "Перевірте, що лист надійшов з офіційного домену сервісу, перш ніж відкривати налаштування.",
+            "Для налаштування платежів або бізнес-профілю відкрийте dashboard вручну через офіційний сайт.",
+            "Не змінюйте платіжні або командні налаштування через redirect-посилання, якщо домен у браузері не підтверджений.",
+            "Якщо лист неочікуваний, перевірте його у своєму акаунті сервісу або зверніться до підтримки через офіційний канал.",
         ]
     return []
 
@@ -427,7 +444,7 @@ def completed_local_fallback_result(
         "AI unavailable",
     )
     context = email_context_for_analysis(subject, body, url_scan_agg)
-    benign_context = context in {EMAIL_CONTEXT_RECEIPT, EMAIL_CONTEXT_MEETING, EMAIL_CONTEXT_NEWSLETTER}
+    benign_context = context in {EMAIL_CONTEXT_RECEIPT, EMAIL_CONTEXT_MEETING, EMAIL_CONTEXT_NEWSLETTER, EMAIL_CONTEXT_SERVICE_SETUP}
     if finalized.get("ai_score", 0) < 45 and not (benign_context and not _has_suspicious_evidence(url_scan_agg)):
         finalized["credential_theft"] = max(finalized.get("credential_theft", 0), 60)
         finalized["urgency"] = max(finalized.get("urgency", 0), 40)
