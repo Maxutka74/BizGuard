@@ -5,6 +5,8 @@ from rest_framework_simplejwt.tokens import RefreshToken
 
 from apps.accounts.cookies import ACCESS_COOKIE, REFRESH_COOKIE
 from apps.accounts.models import User
+from apps.accounts.google_oauth import get_or_create_user_from_google
+from apps.gmail.models import EmailAccount
 from apps.licenses.models import LicensePlan
 from apps.licenses.services import create_license_key
 
@@ -92,6 +94,33 @@ class CookieAuthTests(TestCase):
 class GoogleEmailFirstLoginTests(TestCase):
     def setUp(self):
         self.client = APIClient()
+
+    def test_bizguard_google_login_creates_active_gmail_account(self):
+        user = get_or_create_user_from_google(
+            {
+                "access_token": "gmail-access",
+                "refresh_token": "gmail-refresh",
+                "expires_in": 3600,
+                "scope": "openid email profile https://www.googleapis.com/auth/gmail.modify",
+            },
+            {
+                "sub": "google-email-first",
+                "email": "protected@example.com",
+                "name": "Protected User",
+            },
+            trigger_initial_scan=False,
+        )
+
+        account = EmailAccount.objects.get(user=user)
+        self.assertTrue(account.is_active)
+        self.assertEqual(account.email, user.email)
+        self.assertEqual(account.refresh_token, "gmail-refresh")
+
+        refresh = RefreshToken.for_user(user)
+        self.client.cookies[ACCESS_COOKIE] = str(refresh.access_token)
+        response = self.client.get("/api/accounts/me")
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.data["gmailConnected"])
 
     @patch("apps.accounts.views.get_or_create_user_from_google")
     @patch("apps.accounts.views.fetch_google_userinfo")

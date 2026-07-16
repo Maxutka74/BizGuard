@@ -6,6 +6,9 @@ from rest_framework_simplejwt.tokens import RefreshToken
 
 from apps.accounts.models import User
 from apps.licenses.models import LicenseKey
+from apps.licenses.services import activate_license_for_user, validate_license_key
+
+from .models import PurchaseOrder
 
 
 @override_settings(BILLING_FAKE_MODE=True, PURCHASE_SITE_URL="http://localhost:5174")
@@ -58,7 +61,7 @@ class BillingTests(TestCase):
 
         again = self.client.post("/api/billing/complete", {"sessionId": checkout.data["sessionId"]}, format="json")
         self.assertEqual(again.status_code, 200)
-        self.assertIsNone(again.data["plaintextKey"])
+        self.assertEqual(again.data["plaintextKey"], complete.data["plaintextKey"])
         self.assertEqual(LicenseKey.objects.count(), 1)
 
     @override_settings(BILLING_FAKE_MODE=False, STRIPE_SECRET_KEY="")
@@ -164,13 +167,17 @@ class BillingTests(TestCase):
         self.assertEqual(complete.data["code"], "payment_not_paid")
         self.assertEqual(LicenseKey.objects.count(), 0)
 
-    def test_profile_does_not_return_plaintext_key(self):
+    def test_profile_returns_full_key_to_authenticated_owner(self):
         checkout = self.client.post(
             "/api/billing/checkout",
             {"plan": "year", "activationCount": 2},
             format="json",
         )
-        self.client.post("/api/billing/complete", {"sessionId": checkout.data["sessionId"]}, format="json")
+        complete = self.client.post("/api/billing/complete", {"sessionId": checkout.data["sessionId"]}, format="json")
+        plaintext = complete.data["plaintextKey"]
+        order = PurchaseOrder.objects.get(id=complete.data["order"]["id"])
+        self.assertNotEqual(order.encrypted_license_key, plaintext)
+        self.assertNotIn(plaintext, order.encrypted_license_key)
         profile = self.client.get("/api/billing/profile")
         self.assertEqual(profile.status_code, 200)
         self.assertEqual(profile.data["orders"][0]["currency"], "uah")
@@ -178,4 +185,72 @@ class BillingTests(TestCase):
         self.assertEqual(profile.data["orders"][0]["baseAmount"], 89900)
         self.assertEqual(profile.data["orders"][0]["extraSeatAmount"], 8000)
         self.assertIn("generatedLicense", profile.data["orders"][0])
-        self.assertNotIn("plaintextKey", profile.data["orders"][0])
+        self.assertEqual(profile.data["orders"][0]["generatedLicense"]["key"], plaintext)
+        self.assertFalse(profile.data["orders"][0]["generatedLicense"]["canReissue"])
+
+    def test_legacy_unused_key_can_be_reissued_and_copied(self):
+        checkout = self.client.post(
+            "/api/billing/checkout",
+            {"plan": "year", "activationCount": 1},
+            format="json",
+        )
+        complete = self.client.post(
+            "/api/billing/complete",
+            {"sessionId": checkout.data["sessionId"]},
+            format="json",
+        )
+        order = PurchaseOrder.objects.get(id=complete.data["order"]["id"])
+        old_key = order.generated_license_key
+        order.encrypted_license_key = ""
+        order.save(update_fields=["encrypted_license_key"])
+
+        response = self.client.post(f"/api/billing/orders/{order.id}/reissue-key", {}, format="json")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.data["reissued"])
+        self.assertTrue(response.data["plaintextKey"].startswith("BG-"))
+        self.assertEqual(response.data["order"]["generatedLicense"]["key"], response.data["plaintextKey"])
+        order.refresh_from_db()
+        self.assertEqual(validate_license_key(response.data["plaintextKey"]).id, order.generated_license_key_id)
+        old_key.refresh_from_db()
+        self.assertFalse(old_key.active)
+
+    def test_legacy_activated_key_is_not_reissued_automatically(self):
+        checkout = self.client.post(
+            "/api/billing/checkout",
+            {"plan": "year", "activationCount": 1},
+            format="json",
+        )
+        complete = self.client.post(
+            "/api/billing/complete",
+            {"sessionId": checkout.data["sessionId"]},
+            format="json",
+        )
+        plaintext = complete.data["plaintextKey"]
+        order = PurchaseOrder.objects.get(id=complete.data["order"]["id"])
+        activate_license_for_user(self.user, validate_license_key(plaintext))
+        order.encrypted_license_key = ""
+        order.save(update_fields=["encrypted_license_key"])
+
+        response = self.client.post(f"/api/billing/orders/{order.id}/reissue-key", {}, format="json")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data["code"], "legacy_key_already_activated")
+
+    def test_user_cannot_reissue_another_users_key(self):
+        checkout = self.client.post("/api/billing/checkout", {"plan": "free_1_day"}, format="json")
+        complete = self.client.post(
+            "/api/billing/complete",
+            {"sessionId": checkout.data["sessionId"]},
+            format="json",
+        )
+        other = User.objects.create(email="other-buyer@example.com")
+        self.client.force_authenticate(other)
+
+        response = self.client.post(
+            f"/api/billing/orders/{complete.data['order']['id']}/reissue-key",
+            {},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 404)

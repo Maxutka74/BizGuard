@@ -1,4 +1,6 @@
 ﻿from rest_framework import serializers
+from django.core.exceptions import ObjectDoesNotExist
+
 from .models import User
 
 
@@ -7,6 +9,7 @@ class UserSerializer(serializers.ModelSerializer):
     last_name = serializers.SerializerMethodField()
     picture = serializers.CharField(source="avatar_url", allow_null=True)
     license = serializers.SerializerMethodField()
+    gmailConnected = serializers.SerializerMethodField()
 
     class Meta:
         model = User
@@ -16,6 +19,7 @@ class UserSerializer(serializers.ModelSerializer):
             "first_name",
             "last_name",
             "picture",
+            "gmailConnected",
             "license",
         )
 
@@ -34,6 +38,12 @@ class UserSerializer(serializers.ModelSerializer):
         from apps.licenses.services import get_license_status_for_user
 
         return get_license_status_for_user(obj)
+
+    def get_gmailConnected(self, obj):
+        try:
+            return bool(obj.email_account.is_active)
+        except (AttributeError, ObjectDoesNotExist):
+            return False
 
 
 class GoogleAuthCallbackSerializer(serializers.Serializer):

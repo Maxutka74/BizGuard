@@ -2,6 +2,7 @@
 import logging
 from datetime import timedelta
 from django.conf import settings
+from django.db import transaction
 from django.utils import timezone
 from .models import User
 
@@ -90,6 +91,9 @@ def get_or_create_public_user_from_google(token_data: dict, userinfo: dict) -> U
 
     logger.info("Public Google OAuth %s user: %s", "created" if created else "updated", user.email)
     return user
+
+
+@transaction.atomic
 def get_or_create_user_from_google(token_data: dict, userinfo: dict, trigger_initial_scan: bool = True) -> User:
     google_id = userinfo["sub"]
     email = userinfo["email"]
@@ -125,45 +129,41 @@ def get_or_create_user_from_google(token_data: dict, userinfo: dict, trigger_ini
 
     logger.info("Google OAuth %s user: %s", "created" if created else "updated", user.email)
 
-    # в”Ђв”Ђ HACKATHON FIX: Р°РІС‚Рѕ-СЃС‚РІРѕСЂСЋС”РјРѕ EmailAccount РѕРґСЂР°Р·Сѓ РїС–СЃР»СЏ Р»РѕРіС–РЅСѓ в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
-    # РўРѕРєРµРЅРё РІР¶Рµ С” РЅР° User вЂ” РїСЂРѕСЃС‚Рѕ РєРѕРїС–СЋС”РјРѕ С—С… РІ EmailAccount С‰РѕР±
-    # /api/gmail/emails/ С– /api/gmail/emails/stats/ РѕРґСЂР°Р·Сѓ РїСЂР°С†СЋРІР°Р»Рё.
+    # The main Google login also creates the Gmail account used by the scanner.
     _sync_email_account(user, token_data, expiry, trigger_initial_scan=trigger_initial_scan)
 
     return user
 
 
-def _sync_email_account(user: User, token_data: dict, expiry, trigger_initial_scan: bool = True) -> None:
+def _sync_email_account(user: User, token_data: dict, expiry, trigger_initial_scan: bool = True):
     """Create or update EmailAccount from the fresh Google tokens."""
-    try:
-        from apps.gmail.models import EmailAccount
+    from apps.gmail.models import EmailAccount
 
-        access_token = token_data.get("access_token", "")
-        refresh_token = token_data.get("refresh_token", "")
+    access_token = token_data.get("access_token", "")
+    refresh_token = token_data.get("refresh_token", "")
+    if not access_token:
+        raise GoogleOAuthError("Google did not return an access token for Gmail.")
 
-        account, created = EmailAccount.objects.update_or_create(
-            user=user,
-            defaults={
-                "email": user.email,
-                "access_token": access_token,
-                # refresh_token РїСЂРёС…РѕРґРёС‚СЊ С‚С–Р»СЊРєРё РїСЂРё РїРµСЂС€РѕРјСѓ Р»РѕРіС–РЅС–;
-                # РїСЂРё РїРѕРІС‚РѕСЂРЅРѕРјСѓ вЂ” Р·Р±РµСЂС–РіР°С”РјРѕ СЃС‚Р°СЂРёР№
-                **({"refresh_token": refresh_token} if refresh_token else {}),
-                "token_expiry": expiry,
-                "granted_scopes": token_data.get("scope") or " ".join(GMAIL_SCOPES),
-                "is_active": True,
-            },
-        )
-        logger.info(
-            "Google OAuth EmailAccount %s for %s",
-            "created" if created else "updated",
-            user.email,
-        )
-        if trigger_initial_scan:
-            _trigger_initial_scan(account)
-    except Exception as exc:
-        # РќРµ Р»Р°РјР°С”РјРѕ Р»РѕРіС–РЅ СЏРєС‰Рѕ С‰РѕСЃСЊ РїС–С€Р»Рѕ РЅРµ С‚Р°Рє
-        logger.warning("Could not sync EmailAccount after Google OAuth: %s", exc)
+    account, created = EmailAccount.objects.update_or_create(
+        user=user,
+        defaults={
+            "email": user.email,
+            "access_token": access_token,
+            # Google usually returns a refresh token only on first consent.
+            **({"refresh_token": refresh_token} if refresh_token else {}),
+            "token_expiry": expiry,
+            "granted_scopes": token_data.get("scope") or " ".join(GMAIL_SCOPES),
+            "is_active": True,
+        },
+    )
+    logger.info(
+        "Google OAuth EmailAccount %s for %s",
+        "created" if created else "updated",
+        user.email,
+    )
+    if trigger_initial_scan:
+        _trigger_initial_scan(account)
+    return account
 
 
 def _trigger_initial_scan(account) -> None:

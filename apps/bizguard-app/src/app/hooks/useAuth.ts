@@ -8,9 +8,10 @@ import {
   type LicenseStatus,
 } from "../../api/licenses";
 
-type AuthState = "loading" | "authenticating" | "authenticated" | "unauthenticated" | "needs_license";
+type AuthState = "loading" | "authenticating" | "authenticated" | "unauthenticated" | "needs_google" | "needs_license";
 
 function stateForUser(user: User): AuthState {
+  if (!user.gmailConnected) return "needs_google";
   return hasActiveLicense(user.license) ? "authenticated" : "needs_license";
 }
 

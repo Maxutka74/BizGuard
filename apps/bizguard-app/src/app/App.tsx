@@ -72,12 +72,13 @@ export default function App() {
   }
 
   // ── Unauthenticated → show login ─────────────────────────────────────────
-  if (state === "unauthenticated") {
+  if (state === "unauthenticated" || state === "needs_google") {
     return (
       <LoginPage
         onLogin={handleLogin}
         isBusy={authBusy}
         errorMessage={error ?? undefined}
+        needsGmailAccess={state === "needs_google"}
       />
     );
   }

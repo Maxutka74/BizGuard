@@ -4,7 +4,7 @@ from rest_framework.views import APIView
 
 from .models import PurchaseOrder
 from .serializers import CheckoutSerializer, CompleteCheckoutSerializer, PurchaseOrderSerializer
-from .services import BillingError, complete_checkout, create_checkout, plan_catalog
+from .services import BillingError, complete_checkout, create_checkout, plan_catalog, reissue_legacy_key
 
 
 class BillingProfileView(APIView):
@@ -57,4 +57,21 @@ class CompleteCheckoutView(APIView):
             "order": PurchaseOrderSerializer(result["order"]).data,
             "plaintextKey": result["plaintextKey"],
             "alreadyCompleted": result["alreadyCompleted"],
+        })
+
+
+class ReissueLegacyKeyView(APIView):
+    permission_classes = [IsAuthenticated]
+    throttle_scope = "billing_reissue"
+
+    def post(self, request, order_id):
+        try:
+            result = reissue_legacy_key(request.user, order_id)
+        except BillingError as exc:
+            status_code = 404 if exc.code == "order_not_found" else 400
+            return Response({"detail": exc.detail, "code": exc.code}, status=status_code)
+        return Response({
+            "order": PurchaseOrderSerializer(result["order"]).data,
+            "plaintextKey": result["plaintextKey"],
+            "reissued": result["reissued"],
         })

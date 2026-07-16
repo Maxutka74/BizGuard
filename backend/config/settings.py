@@ -34,10 +34,6 @@ INSTALLED_APPS = [
     # BizGuard apps
     "apps.accounts",
     "apps.gmail",
-    "apps.analysis",
-    "apps.emails",
-    "apps.threats",
-    "apps.dashboard",
     "apps.reputation",
     "apps.licenses",
     "apps.billing",
@@ -132,15 +128,16 @@ REST_FRAMEWORK = {
         "scan": os.environ.get("THROTTLE_SCAN", "10/min"),
         "billing_checkout": os.environ.get("THROTTLE_BILLING_CHECKOUT", "20/min"),
         "billing_complete": os.environ.get("THROTTLE_BILLING_COMPLETE", "20/min"),
+        "billing_reissue": os.environ.get("THROTTLE_BILLING_REISSUE", "5/min"),
     },
 }
 if API_DOCS_ENABLED:
     REST_FRAMEWORK["DEFAULT_SCHEMA_CLASS"] = "drf_spectacular.openapi.AutoSchema"
 
 SPECTACULAR_SETTINGS = {
-    'TITLE': 'Monvirex API',
-    'DESCRIPTION': 'Trading simulation platform',
-    'VERSION': '1.0.0',
+    "TITLE": "BizGuard API",
+    "DESCRIPTION": "Gmail phishing protection, licensing and billing API",
+    "VERSION": "1.0.0",
 }
 
 from datetime import timedelta
@@ -186,16 +183,14 @@ GOOGLE_OAUTH_REDIRECT_URI = os.environ.get(
 GOOGLE_PUBLIC_OAUTH_REDIRECT_URI = os.environ.get(
     "GOOGLE_PUBLIC_OAUTH_REDIRECT_URI", "http://localhost:8000/api/accounts/google/public-redirect"
 )
-GMAIL_OAUTH_REDIRECT_URI = os.environ.get(
-    "GMAIL_OAUTH_REDIRECT_URI", "http://localhost:8000/api/gmail/auth/callback/"
-)
-# Aliases used by apps.gmail.services.oauth
-GOOGLE_CLIENT_ID = GOOGLE_OAUTH_CLIENT_ID
-GOOGLE_CLIENT_SECRET = GOOGLE_OAUTH_CLIENT_SECRET
-GOOGLE_REDIRECT_URI = GOOGLE_OAUTH_REDIRECT_URI
-
 # License keys
 LICENSE_KEY_HASH_SECRET = os.environ.get("LICENSE_KEY_HASH_SECRET", SECRET_KEY)
+BILLING_LICENSE_ENCRYPTION_SECRET = os.environ.get("BILLING_LICENSE_ENCRYPTION_SECRET", "")
+if not BILLING_LICENSE_ENCRYPTION_SECRET:
+    if DEBUG:
+        BILLING_LICENSE_ENCRYPTION_SECRET = LICENSE_KEY_HASH_SECRET
+    else:
+        raise RuntimeError("BILLING_LICENSE_ENCRYPTION_SECRET is required when DEBUG=False.")
 LICENSE_GATE_TOKEN_MAX_AGE_SECONDS = int(os.environ.get("LICENSE_GATE_TOKEN_MAX_AGE_SECONDS", "600"))
 
 # ── AI / Reputation APIs ──────────────────────────────────────────────────

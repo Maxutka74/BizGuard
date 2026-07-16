@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import {
   ArrowRight,
@@ -25,7 +25,9 @@ type User = {
   email: string
   first_name?: string
   last_name?: string
+  name?: string
   picture?: string | null
+  avatar?: string | null
 }
 
 type Order = {
@@ -43,6 +45,8 @@ type Order = {
   currency: string
   generatedLicense?: null | {
     keyPrefix: string
+    key: string | null
+    canReissue: boolean
     plan: string
     planLabel: string
     maxActivations: number
@@ -54,7 +58,7 @@ type Order = {
 }
 
 type ProfilePayload = {
-  user: { id: string; email: string; name?: string; avatar?: string | null }
+  user: { id: string; email: string; name?: string; avatar?: string | null; picture?: string | null }
   orders: Order[]
 }
 
@@ -80,7 +84,7 @@ const plans: Array<{
     price: '0 грн',
     period: '1 день доступу',
     badge: 'Тест сервісу',
-    description: 'Швидко спробувати BizGuard на невеликій кількості листів.',
+    description: 'Швидкий тест BizGuard на невеликій кількості листів перед покупкою бізнес-ключа.',
     accent: 'soft',
     baseAmount: 0,
     extraSeatAmount: 0,
@@ -92,7 +96,7 @@ const plans: Array<{
     price: '499 грн',
     period: 'пів року захисту',
     badge: 'Оптимальний старт',
-    description: 'Регулярний захист для особистої пошти та малих команд.',
+    description: 'Регулярний захист для особистої пошти, малого бізнесу або невеликої команди.',
     accent: 'blue',
     baseAmount: 49900,
     extraSeatAmount: 5000,
@@ -104,7 +108,7 @@ const plans: Array<{
     price: '899 грн',
     period: 'максимальний захист',
     badge: 'Найкращий вибір',
-    description: 'Пріоритетний AI-аналіз, allowlist і глибша перевірка загроз.',
+    description: 'Пріоритетний AI-аналіз, allowlist і глибша перевірка загроз для команди.',
     accent: 'green',
     baseAmount: 89900,
     extraSeatAmount: 8000,
@@ -156,6 +160,7 @@ function App() {
   const [error, setError] = useState('')
   const [successKey, setSuccessKey] = useState<string | null>(null)
   const [successOrder, setSuccessOrder] = useState<Order | null>(null)
+  const [reissuingOrderId, setReissuingOrderId] = useState<string | null>(null)
   const completingSessionRef = useRef<string | null>(null)
   const route = window.location.pathname
 
@@ -189,8 +194,16 @@ function App() {
   async function restoreProfile() {
     try {
       const me = await apiFetch<User>('/api/accounts/me')
-      setUser(me)
       const profile = await apiFetch<ProfilePayload>('/api/billing/profile')
+      setUser({
+        ...me,
+        id: profile.user.id || me.id,
+        email: profile.user.email || me.email,
+        name: profile.user.name || me.name,
+        first_name: me.first_name || profile.user.name || me.email,
+        picture: me.picture || profile.user.picture || profile.user.avatar || null,
+        avatar: profile.user.avatar || me.avatar || null,
+      })
       setOrders(profile.orders)
     } catch {
       setUser(null)
@@ -264,11 +277,10 @@ function App() {
     }
 
     try {
-      const payload = await apiFetch<{ user: User }>('/api/accounts/google/public-callback', {
+      await apiFetch<{ user: User }>('/api/accounts/google/public-callback', {
         method: 'POST',
         body: JSON.stringify({ code, redirect_uri: LEGACY_REDIRECT_URI }),
       })
-      setUser(payload.user)
       window.history.replaceState({}, '', '/')
       await restoreProfile()
       const pendingPlan = sessionStorage.getItem('purchase_pending_plan') as PlanId | null
@@ -317,6 +329,7 @@ function App() {
   async function buyPlan(plan: PlanId) {
     const activationCount = activationCounts[plan] || 1
     if (!user) {
+      setError('Щоб купити ключ, спочатку увійдіть через Google. Після входу оплата продовжиться автоматично.')
       await loginWithGoogle('plans', plan, activationCount)
       return
     }
@@ -372,6 +385,22 @@ function App() {
     setActivationCounts((current) => ({ ...current, [plan]: next }))
   }
 
+  async function reissueLegacyKey(orderId: string) {
+    setReissuingOrderId(orderId)
+    setError('')
+    try {
+      const payload = await apiFetch<{ order: Order; plaintextKey: string; reissued: boolean }>(
+        `/api/billing/orders/${orderId}/reissue-key`,
+        { method: 'POST', body: JSON.stringify({}) },
+      )
+      setOrders((current) => current.map((order) => order.id === orderId ? payload.order : order))
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Не вдалося перевидати ключ.')
+    } finally {
+      setReissuingOrderId(null)
+    }
+  }
+
   return (
     <main className="site-shell">
       <Header user={user} activeTab={activeTab} onTab={goTab} onLogin={() => loginWithGoogle()} onLogout={logout} />
@@ -393,7 +422,16 @@ function App() {
               onBuy={buyPlan}
             />
           )}
-          {activeTab === 'profile' && <ProfileView user={user} orders={orders} paidOrders={paidOrders} onLogin={() => loginWithGoogle()} />}
+          {activeTab === 'profile' && (
+            <ProfileView
+              user={user}
+              orders={orders}
+              paidOrders={paidOrders}
+              reissuingOrderId={reissuingOrderId}
+              onReissue={reissueLegacyKey}
+              onLogin={() => loginWithGoogle()}
+            />
+          )}
         </>
       ) : null}
     </main>
@@ -521,12 +559,28 @@ function PlansView({
   )
 }
 
-function ProfileView({ user, orders, paidOrders, onLogin }: { user: User | null; orders: Order[]; paidOrders: Order[]; onLogin: () => void }) {
+function ProfileView({
+  user,
+  orders,
+  paidOrders,
+  reissuingOrderId,
+  onReissue,
+  onLogin,
+}: {
+  user: User | null
+  orders: Order[]
+  paidOrders: Order[]
+  reissuingOrderId: string | null
+  onReissue: (orderId: string) => Promise<void>
+  onLogin: () => void
+}) {
+  const avatar = user?.picture || user?.avatar || null
+  const displayName = user?.first_name || user?.name || user?.email
   return (
     <section className="screen-panel profile-section">
       <div className="section-title">
         <span><UserCircle size={18} /> Профіль</span>
-        <p>Покупки, статуси оплат і ключі без повного plaintext після першого показу.</p>
+        <p>Тут зберігаються ваші покупки та повні ключі активації. Ключ доступний тільки після входу у ваш Google-акаунт.</p>
       </div>
       {!user ? (
         <div className="empty-panel profile-empty">
@@ -539,9 +593,9 @@ function ProfileView({ user, orders, paidOrders, onLogin }: { user: User | null;
       ) : (
         <div className="profile-grid">
           <aside className="profile-card">
-            {user.picture ? <img src={user.picture} alt="" /> : <div className="avatar-fallback">{user.email.slice(0, 1).toUpperCase()}</div>}
+            {avatar ? <img src={avatar} alt="Аватар користувача" referrerPolicy="no-referrer" /> : <div className="avatar-fallback">{user.email.slice(0, 1).toUpperCase()}</div>}
             <div>
-              <b>{user.first_name || user.email}</b>
+              <b>{displayName}</b>
               <span>{user.email}</span>
               <small>Оплачених ключів: {paidOrders.length}</small>
             </div>
@@ -552,9 +606,16 @@ function ProfileView({ user, orders, paidOrders, onLogin }: { user: User | null;
               <div className="empty-orders">
                 <KeyRound size={26} />
                 <b>Покупок ще немає</b>
-                <span>Оберіть тариф, оплатіть його і тут з’явиться preview ключа.</span>
+                <span>Оберіть тариф і оплатіть його. Після підтвердження тут зʼявиться повний ключ активації.</span>
               </div>
-            ) : orders.map((order) => <OrderRow key={order.id} order={order} />)}
+            ) : orders.map((order) => (
+              <OrderRow
+                key={order.id}
+                order={order}
+                isReissuing={reissuingOrderId === order.id}
+                onReissue={onReissue}
+              />
+            ))}
           </div>
         </div>
       )}
@@ -562,34 +623,74 @@ function ProfileView({ user, orders, paidOrders, onLogin }: { user: User | null;
   )
 }
 
-function OrderRow({ order }: { order: Order }) {
+function OrderRow({
+  order,
+  isReissuing,
+  onReissue,
+}: {
+  order: Order
+  isReissuing: boolean
+  onReissue: (orderId: string) => Promise<void>
+}) {
   const license = order.generatedLicense
+  const [copied, setCopied] = useState(false)
+  const displayedKey = license?.key || ''
+
+  async function copyDisplayedKey() {
+    if (!displayedKey) return
+    await copyText(displayedKey)
+    setCopied(true)
+    window.setTimeout(() => setCopied(false), 1600)
+  }
+
   return (
     <div className="order-row">
       <div className="order-main">
         <b>{order.planLabel}</b>
-        <span>{formatMoney(order.amount, order.currency)} · {order.activationCount} активац. · {statusLabel(order.status)} · {new Date(order.createdAt).toLocaleDateString('uk-UA')}</span>
+        <span>{formatMoney(order.amount, order.currency)} · {order.activationCount} активац. · <span className={`status-pill ${order.status}`}>{statusLabel(order.status)}</span> · {new Date(order.createdAt).toLocaleDateString('uk-UA')}</span>
         <small className="muted">База {formatMoney(order.baseAmount, order.currency)} · додатково {formatMoney(order.extraSeatAmount, order.currency)}</small>
       </div>
       {license ? (
         <div className="license-preview">
-          <code>{license.keyPrefix}...</code>
+          {displayedKey ? (
+            <>
+              <small className="license-label">Ваш ключ активації</small>
+              <div className="license-copy-row">
+                <code>{displayedKey}</code>
+                <button className="copy-key-button" onClick={copyDisplayedKey} type="button" title="Скопіювати повний ключ">
+                  <Copy size={15} /> {copied ? 'Скопійовано' : 'Копіювати ключ'}
+                </button>
+              </div>
+            </>
+          ) : license.canReissue ? (
+            <div className="legacy-key-box">
+              <span>Цей ключ придбано до появи захищеного зберігання. Він ще не активований, тому його можна безпечно перевидати.</span>
+              <button className="copy-key-button" type="button" disabled={isReissuing} onClick={() => onReissue(order.id)}>
+                <KeyRound size={15} /> {isReissuing ? 'Перевидаємо...' : 'Показати повний ключ'}
+              </button>
+            </div>
+          ) : (
+            <small>Повний старий ключ неможливо відновити, оскільки він уже використовувався. Зверніться до адміністратора для ручної заміни.</small>
+          )}
           <small>{license.activationCount}/{license.maxActivations} використано · залишилось {license.remainingActivations}</small>
         </div>
       ) : (
-        <span className="muted">Ключ буде після оплати</span>
+        <div className="license-preview pending-license">
+          <span className="muted">{order.status === 'pending' ? 'Очікує оплати. Ключ буде створений тільки після підтвердженої оплати.' : 'Ключ не створено.'}</span>
+        </div>
       )}
     </div>
   )
 }
 
 function SuccessView({ order, plaintextKey, onProfile }: { order: Order | null; plaintextKey: string | null; onProfile: () => void }) {
+  const visibleKey = plaintextKey || order?.generatedLicense?.key || null
   return (
     <section className="result-page success">
       <Sparkles size={30} />
       <h1>Оплата успішна</h1>
-      <p>Ключ потрібно ввести в BizGuard app перед Gmail login. Повний ключ показується тільки тут.</p>
-      {plaintextKey ? <KeyBox value={plaintextKey} /> : <div className="notice">Повний ключ уже показувався раніше. У профілі доступний тільки prefix.</div>}
+      <p>Ваш ключ завжди доступний у профілі покупця. Скопіюйте його, увійдіть у BizGuard через Google і активуйте доступ.</p>
+      {visibleKey ? <KeyBox value={visibleKey} /> : <div className="notice">Ключ ще не сформовано. Оновіть сторінку або відкрийте профіль.</div>}
       {order ? (
         <p className="muted">
           Тариф: {order.planLabel} · {order.activationCount} активац. · {formatMoney(order.amount, order.currency)}
@@ -606,7 +707,7 @@ function SuccessView({ order, plaintextKey, onProfile }: { order: Order | null; 
 function KeyBox({ value }: { value: string }) {
   const [copied, setCopied] = useState(false)
   async function copy() {
-    await navigator.clipboard.writeText(value)
+    await copyText(value)
     setCopied(true)
     setTimeout(() => setCopied(false), 1600)
   }
@@ -618,6 +719,24 @@ function KeyBox({ value }: { value: string }) {
       {copied ? <span>Скопійовано</span> : null}
     </div>
   )
+}
+
+async function copyText(value: string): Promise<void> {
+  if (navigator.clipboard?.writeText && window.isSecureContext) {
+    await navigator.clipboard.writeText(value)
+    return
+  }
+
+  const input = document.createElement('textarea')
+  input.value = value
+  input.setAttribute('readonly', '')
+  input.style.position = 'fixed'
+  input.style.opacity = '0'
+  document.body.appendChild(input)
+  input.select()
+  const copied = document.execCommand('copy')
+  document.body.removeChild(input)
+  if (!copied) throw new Error('Не вдалося скопіювати код.')
 }
 
 function CancelView({ onPlans }: { onPlans: () => void }) {

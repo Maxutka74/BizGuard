@@ -1,7 +1,7 @@
 """
 Service layer for domain reputation lookups.
 
-Other Django apps (e.g. apps.analysis, apps.emails) should import
+The Gmail analysis pipeline should import
 `get_domain_reputation` from here rather than calling VirusTotal directly.
 The service implements cache-first logic backed by the DomainReputation model.
 """

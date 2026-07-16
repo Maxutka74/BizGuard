@@ -1,8 +1,8 @@
 ﻿"""
 Root URL configuration for the BizGuard API.
 
-The frontend currently uses /api/accounts/ for auth and /api/gmail/ for the
-dashboard email contract. Other app routes are kept for compatibility.
+The public application routes expose authentication, licensing, billing,
+Gmail analysis and reputation services.
 """
 
 from django.contrib import admin
@@ -16,11 +16,7 @@ urlpatterns = [
     path("api/licenses/", include("apps.licenses.urls")),
     path("api/billing/", include("apps.billing.urls")),
     path("api/gmail/", include("apps.gmail.urls")),
-    path("api/dashboard/", include("apps.dashboard.urls")),
-    path("api/analysis/", include("apps.analysis.urls")),
     path("api/reputation/", include("apps.reputation.urls")),
-    path("api/emails/", include("apps.emails.urls")),
-    path("api/threats/", include("apps.threats.urls")),
 ]
 
 if settings.API_DOCS_ENABLED:

@@ -40,6 +40,8 @@ class PurchaseOrder(models.Model):
         blank=True,
         related_name="purchase_orders",
     )
+    # Recoverable only with BILLING_LICENSE_ENCRYPTION_SECRET. Never log this value.
+    encrypted_license_key = models.TextField(blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
     paid_at = models.DateTimeField(null=True, blank=True)
     updated_at = models.DateTimeField(auto_now=True)

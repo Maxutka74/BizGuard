@@ -4,9 +4,10 @@ interface LoginPageProps {
   onLogin: () => void;
   isBusy?: boolean;
   errorMessage?: string;
+  needsGmailAccess?: boolean;
 }
 
-export function LoginPage({ onLogin, isBusy = false, errorMessage }: LoginPageProps) {
+export function LoginPage({ onLogin, isBusy = false, errorMessage, needsGmailAccess = false }: LoginPageProps) {
   return (
     <div className="min-h-screen flex items-center justify-center relative overflow-hidden px-4 py-10" style={{ background: "var(--background)" }}>
       <div
@@ -44,9 +45,11 @@ export function LoginPage({ onLogin, isBusy = false, errorMessage }: LoginPagePr
         </div>
 
         <div className="rounded-xl p-7" style={{ background: "var(--card)", border: "1px solid var(--border)", boxShadow: "0 8px 48px rgba(0,0,0,0.4)" }}>
-          <h2 className="mb-2" style={{ color: "var(--foreground)", fontWeight: 650 }}>Увійдіть через Google</h2>
+          <h2 className="mb-2" style={{ color: "var(--foreground)", fontWeight: 650 }}>
+            {needsGmailAccess ? "Надайте доступ до Gmail" : "Увійдіть через Google"}
+          </h2>
           <p className="mb-6" style={{ color: "var(--muted-foreground)", fontSize: "0.875rem", lineHeight: 1.6 }}>
-            Спочатку підтвердьте email. Після входу BizGuard попросить ліцензійний ключ і перевірить, чи він активний саме для цього акаунта.
+            Оберіть Google акаунт із поштою, яку потрібно захищати. Після входу BizGuard попросить ліцензійний ключ, і лише після його активації відкриє аналіз листів.
           </p>
 
           {errorMessage && (
@@ -58,9 +61,9 @@ export function LoginPage({ onLogin, isBusy = false, errorMessage }: LoginPagePr
 
           <div className="space-y-3 mb-6">
             {[
-              "Ліцензія прив'язується до Google email",
+              "Google-вхід одразу підключає Gmail для перевірки листів",
+              "Після входу потрібно ввести придбаний ключ активації",
               "Повторний вхід з того самого email не списує нове місце",
-              "Якщо строк ключа завершився, потрібно купити або активувати новий",
             ].map((text) => (
               <div key={text} className="flex items-center gap-3">
                 <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: "var(--accent)", border: "1px solid var(--border)" }}>

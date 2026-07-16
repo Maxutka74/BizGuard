@@ -7,6 +7,7 @@ export interface User {
   first_name: string;
   last_name: string;
   picture?: string;
+  gmailConnected: boolean;
   license?: LicenseStatus;
 }
 

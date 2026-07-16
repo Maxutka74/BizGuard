@@ -1,10 +1,8 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import logging
-import secrets
 
-from django.conf import settings
-from django.shortcuts import get_object_or_404, redirect
+from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes, throttle_classes
@@ -26,11 +24,6 @@ from apps.gmail.serializers import (
     TrustedSenderRuleSerializer,
 )
 from apps.gmail.services.queue import enqueue_ai_queue
-from apps.gmail.services.oauth import (
-    build_authorization_url,
-    exchange_code_for_tokens,
-    get_google_userinfo,
-)
 from apps.gmail.services.sync import sync_account
 from apps.licenses.services import get_user_capabilities
 
@@ -41,9 +34,9 @@ class ScanRateThrottle(UserRateThrottle):
     scope = "scan"
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 # Email list   GET /api/gmail/emails/
-# ─────────────────────────────────────────────────────────────────────────────
+# в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
@@ -86,9 +79,9 @@ def email_list(request: Request) -> Response:
     })
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 # Email stats   GET /api/gmail/emails/stats/
-# ─────────────────────────────────────────────────────────────────────────────
+# в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
@@ -132,9 +125,9 @@ def email_progress(request: Request) -> Response:
     return Response(serializer.data)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 # Email detail   GET /api/gmail/emails/{id}/
-# ─────────────────────────────────────────────────────────────────────────────
+# в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
@@ -145,9 +138,9 @@ def email_detail(request: Request, email_id: str) -> Response:
     return Response(serializer.data)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 # Rescan   POST /api/gmail/scan/
-# ─────────────────────────────────────────────────────────────────────────────
+# в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
@@ -241,10 +234,7 @@ def scan_status(request: Request, scan_id: str) -> Response:
         )
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# OAuth init   GET /api/gmail/auth/init/
-# ─────────────────────────────────────────────────────────────────────────────
-
+# в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 @api_view(["GET", "POST"])
 @permission_classes([IsAuthenticated])
 def trusted_sender_rules(request: Request) -> Response:
@@ -287,87 +277,6 @@ def trusted_sender_rule_delete(request: Request, rule_id: int) -> Response:
     return Response(status=status.HTTP_204_NO_CONTENT)
 
 
-@api_view(["GET"])
-@permission_classes([IsAuthenticated])
-def oauth_init(request: Request) -> Response:
-    state = secrets.token_urlsafe(32)
-    request.session["oauth_state"] = state
-    url = build_authorization_url(state=state)
-    return Response({"authorization_url": url, "state": state})
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# OAuth callback   GET /api/gmail/auth/callback/
-# ─────────────────────────────────────────────────────────────────────────────
-
-@api_view(["GET"])
-@permission_classes([IsAuthenticated])
-def oauth_callback(request: Request) -> Response:
-    code = request.query_params.get("code")
-    state = request.query_params.get("state")
-    error = request.query_params.get("error")
-    wants_json = "application/json" in request.headers.get("accept", "").lower() or request.query_params.get("format") == "json"
-
-    def finish_with_error(code_value: str, detail: str, response_status: int = 400):
-        if wants_json:
-            return Response({"detail": detail, "code": code_value}, status=response_status)
-        frontend_url = settings.BIZGUARD_APP_URL.rstrip("/")
-        return redirect(f"{frontend_url}/?gmail_error={code_value}")
-
-    if error:
-        return finish_with_error("google_oauth_error", f"Помилка авторизації Google: {error}")
-    if not code:
-        return finish_with_error("missing_code", "Google не повернув код авторизації.")
-
-    session_state = request.session.get("oauth_state")
-    if session_state and state != session_state:
-        return finish_with_error("invalid_state", "Не вдалося перевірити захисний OAuth state.")
-
-    try:
-        tokens = exchange_code_for_tokens(code)
-    except Exception as exc:
-        logger.exception("Token exchange failed: %s", exc)
-        return finish_with_error("token_exchange_failed", "Не вдалося обміняти код авторизації Google.", 502)
-
-    userinfo = get_google_userinfo(tokens["access_token"])
-    if not userinfo or not userinfo.get("email"):
-        return finish_with_error("missing_google_email", "Не вдалося отримати email Google акаунта.", 502)
-
-    gmail_email = userinfo["email"]
-    expiry = tokens.get("expiry")
-    if expiry and expiry.tzinfo is None:
-        from django.utils import timezone as tz
-        expiry = tz.make_aware(expiry)
-
-    account, created = EmailAccount.objects.update_or_create(
-        user=request.user,
-        defaults={
-            "email": gmail_email,
-            "access_token": tokens["access_token"],
-            "refresh_token": tokens.get("refresh_token", ""),
-            "token_expiry": expiry,
-            "granted_scopes": tokens.get("scope", ""),
-            "is_active": True,
-        },
-    )
-
-    _trigger_sync(account)
-
-    serializer = EmailAccountSerializer(account)
-    if wants_json:
-        return Response(
-            {"account": serializer.data, "created": created, "message": "Gmail акаунт підключено."},
-            status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
-        )
-
-    frontend_url = settings.BIZGUARD_APP_URL.rstrip("/")
-    return redirect(f"{frontend_url}/?gmail=connected")
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Disconnect   DELETE /api/gmail/auth/disconnect/
-# ─────────────────────────────────────────────────────────────────────────────
-
 @api_view(["DELETE"])
 @permission_classes([IsAuthenticated])
 def disconnect_account(request: Request) -> Response:
@@ -375,14 +284,14 @@ def disconnect_account(request: Request) -> Response:
         account = EmailAccount.objects.get(user=request.user, is_active=True)
         account.is_active = False
         account.save(update_fields=["is_active"])
-        return Response({"message": "Gmail акаунт відключено."})
+        return Response({"message": "Gmail-акаунт відключено."})
     except EmailAccount.DoesNotExist:
-        return Response({"detail": "Активний Gmail акаунт не знайдено."}, status=404)
+        return Response({"detail": "Активний Gmail-акаунт не знайдено."}, status=404)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 # Account status   GET /api/gmail/auth/status/
-# ─────────────────────────────────────────────────────────────────────────────
+# в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
@@ -397,9 +306,9 @@ def account_status(request: Request) -> Response:
         return Response({"connected": False})
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 # Helpers
-# ─────────────────────────────────────────────────────────────────────────────
+# в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 
 
 def _stats_payload(account: EmailAccount) -> dict:
@@ -424,75 +333,32 @@ def _stats_payload(account: EmailAccount) -> dict:
         "distribution": distribution,
         "lastScannedAt": account.last_synced_at,
     }
+
+
 def _trusted_sender_capability_error(request: Request) -> Response | None:
     capabilities = get_user_capabilities(request.user)
     if capabilities.get("trustedSenderAllowlist"):
         return None
-    return Response({"detail": "Список дозволених відправників доступний лише на річному тарифі."}, status=403)
+    return Response(
+        {"detail": "Список довірених відправників доступний лише на річному тарифі."},
+        status=403,
+    )
 
 
 def _get_account_or_404(request: Request) -> EmailAccount:
-    """
-    Return user's active EmailAccount.
-
-    HACKATHON FIX: якщо EmailAccount не існує, пробуємо авто-створити
-    його з токенів allauth SocialToken (якщо використовується allauth),
-    або повертаємо 404 з зрозумілим повідомленням.
-    """
+    """Return the active Gmail account created during the main Google login."""
     try:
         return EmailAccount.objects.get(user=request.user, is_active=True)
     except EmailAccount.DoesNotExist:
         pass
 
-    # Спроба авто-створення з allauth SocialToken
-    account = _try_create_account_from_allauth(request.user)
-    if account:
-        return account
-
     from rest_framework.exceptions import NotFound
-    raise NotFound({"detail": "Gmail акаунт ще не підключено. Підключіть Gmail, щоб сканувати листи.", "code": "gmail_not_connected"})
-
-
-def _try_create_account_from_allauth(user) -> "EmailAccount | None":
-    """
-    Якщо юзер залогінився через allauth Google OAuth (accounts app),
-    його access_token вже є в SocialToken. Беремо його і створюємо
-    EmailAccount автоматично — без повторного OAuth flow.
-    """
-    try:
-        from allauth.socialaccount.models import SocialToken, SocialApp
-        token_qs = SocialToken.objects.filter(
-            account__user=user,
-            account__provider="google",
-        ).select_related("account__user").first()
-
-        if not token_qs:
-            return None
-
-        gmail_email = user.email
-        if not gmail_email:
-            return None
-
-        account, _ = EmailAccount.objects.update_or_create(
-            user=user,
-            defaults={
-                "email": gmail_email,
-                "access_token": token_qs.token,
-                "refresh_token": token_qs.token_secret or "",
-                "token_expiry": token_qs.expires_at,
-                "is_active": True,
-            },
-        )
-        logger.info(
-            "Auto-created EmailAccount for %s from allauth SocialToken", gmail_email
-        )
-        # Запускаємо початковий синк у фоні
-        _trigger_sync(account)
-        return account
-
-    except Exception as exc:
-        logger.debug("Could not auto-create EmailAccount from allauth: %s", exc)
-        return None
+    raise NotFound(
+        {
+            "detail": "Gmail-акаунт ще не підключено. Увійдіть через Google ще раз.",
+            "code": "gmail_not_connected",
+        }
+    )
 
 
 def _trigger_sync(account: EmailAccount) -> None:
@@ -524,9 +390,5 @@ def _trigger_sync(account: EmailAccount) -> None:
 
 def _trigger_ai_queue(account_id: int) -> None:
     enqueue_ai_queue(account_id, debounce_seconds=3)
-
-
-
-
 
 

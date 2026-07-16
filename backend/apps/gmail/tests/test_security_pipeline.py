@@ -54,7 +54,7 @@ from apps.reputation import url_service
 from apps.reputation.url_service import _score_url, extract_meaningful_urls, get_url_reputation, scan_urls_in_text
 from apps.licenses.models import LicensePlan
 from apps.licenses.services import activate_license_for_user, create_license_key, validate_license_key
-from apps.threats.scoring import compute_threat_result
+from apps.gmail.services.threat_scoring import compute_threat_result
 
 
 class EmailBodyCleanupTests(SimpleTestCase):

@@ -35,7 +35,7 @@ from apps.gmail.services.attachment_analysis import empty_attachment_scan_summar
 from apps.gmail.services.domain_analysis import analyze_domain
 from apps.gmail.services.security_checks import analyze_security_signals
 from apps.reputation.url_service import empty_url_scan_summary, extract_meaningful_urls, scan_urls_in_text
-from apps.threats.scoring import compute_threat_result
+from apps.gmail.services.threat_scoring import compute_threat_result
 
 logger = logging.getLogger(__name__)
 ANALYSIS_VERSION = 6

@@ -57,8 +57,13 @@ class PurchaseOrderSerializer(serializers.ModelSerializer):
         key = obj.generated_license_key
         if not key:
             return None
+        from .services import decrypt_license_key
+
+        plaintext = decrypt_license_key(obj.encrypted_license_key)
         return {
             "keyPrefix": key.key_prefix,
+            "key": plaintext,
+            "canReissue": not obj.encrypted_license_key and key.activation_count == 0,
             "plan": key.plan,
             "planLabel": PLAN_LABELS.get(key.plan, key.get_plan_display()),
             "maxActivations": key.max_activations,

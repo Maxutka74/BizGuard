@@ -1,10 +1,13 @@
+import base64
+import hashlib
 import secrets
 
 import requests
+from cryptography.fernet import Fernet, InvalidToken
 from django.conf import settings
 from django.db import transaction
 
-from apps.licenses.models import LicensePlan
+from apps.licenses.models import LicenseKey, LicensePlan
 from apps.licenses.services import LicenseServiceError, create_license_key
 
 from .models import PurchaseOrder
@@ -38,6 +41,27 @@ class BillingError(Exception):
         self.code = code
         self.detail = detail
         super().__init__(detail)
+
+
+def encrypt_license_key(plaintext: str) -> str:
+    """Encrypt a purchased key for owner-only recovery in the billing profile."""
+    return _license_cipher().encrypt(plaintext.encode("utf-8")).decode("ascii")
+
+
+def decrypt_license_key(ciphertext: str) -> str | None:
+    """Return the purchased key or None for legacy/unreadable records."""
+    if not ciphertext:
+        return None
+    try:
+        return _license_cipher().decrypt(ciphertext.encode("ascii")).decode("utf-8")
+    except (InvalidToken, UnicodeError, ValueError):
+        return None
+
+
+def _license_cipher() -> Fernet:
+    secret = settings.BILLING_LICENSE_ENCRYPTION_SECRET
+    derived_key = hashlib.sha256(secret.encode("utf-8")).digest()
+    return Fernet(base64.urlsafe_b64encode(derived_key))
 
 
 def plan_catalog() -> list[dict]:
@@ -90,7 +114,7 @@ def create_checkout(user, plan: str, activation_count: int = 1) -> dict:
         return _create_direct_checkout(order)
 
     if not settings.STRIPE_SECRET_KEY:
-        raise BillingError("stripe_not_configured", "Stripe test key не налаштований.")
+        raise BillingError("stripe_not_configured", "Stripe key не налаштований.")
 
     success_url = settings.PURCHASE_SITE_URL.rstrip("/") + "/payment/success?session_id={CHECKOUT_SESSION_ID}"
     cancel_url = settings.PURCHASE_SITE_URL.rstrip("/") + "/payment/cancel"
@@ -126,7 +150,7 @@ def create_checkout(user, plan: str, activation_count: int = 1) -> dict:
     if resp.status_code >= 400:
         order.status = PurchaseOrder.Status.FAILED
         order.save(update_fields=["status", "updated_at"])
-        raise BillingError("stripe_checkout_failed", "Stripe Checkout не створив сесію.")
+        raise BillingError("stripe_checkout_failed", "Stripe Checkout не створив платіжну сесію.")
 
     data = resp.json()
     order.provider_session_id = data["id"]
@@ -151,7 +175,11 @@ def complete_checkout(user, session_id: str) -> dict:
         raise BillingError("order_not_found", "Замовлення не знайдено.")
 
     if order.generated_license_key:
-        return {"order": order, "plaintextKey": None, "alreadyCompleted": True}
+        return {
+            "order": order,
+            "plaintextKey": decrypt_license_key(order.encrypted_license_key),
+            "alreadyCompleted": True,
+        }
 
     if not settings.BILLING_FAKE_MODE and not session_id.startswith("direct_"):
         _verify_stripe_paid(session_id)
@@ -167,8 +195,70 @@ def complete_checkout(user, session_id: str) -> dict:
         raise BillingError(exc.code, exc.detail)
 
     order.generated_license_key = license_key
-    order.save(update_fields=["status", "paid_at", "generated_license_key", "updated_at"])
+    order.encrypted_license_key = encrypt_license_key(plaintext)
+    order.save(
+        update_fields=[
+            "status",
+            "paid_at",
+            "generated_license_key",
+            "encrypted_license_key",
+            "updated_at",
+        ]
+    )
     return {"order": order, "plaintextKey": plaintext, "alreadyCompleted": False}
+
+
+@transaction.atomic
+def reissue_legacy_key(user, order_id) -> dict:
+    """
+    Replace a legacy, unrecoverable key only when it has never been activated.
+
+    The old hash-only key is disabled so both keys can never be valid at once.
+    """
+    order = (
+        PurchaseOrder.objects.select_for_update()
+        .filter(id=order_id, user=user)
+        .first()
+    )
+    if not order:
+        raise BillingError("order_not_found", "Замовлення не знайдено.")
+    if order.status != PurchaseOrder.Status.PAID or not order.generated_license_key:
+        raise BillingError(
+            "license_not_issued",
+            "Для цього замовлення ще немає оплаченого ключа.",
+        )
+
+    existing_plaintext = decrypt_license_key(order.encrypted_license_key)
+    if existing_plaintext:
+        return {"order": order, "plaintextKey": existing_plaintext, "reissued": False}
+    if order.encrypted_license_key:
+        raise BillingError(
+            "license_decryption_failed",
+            "Ключ не вдалося розшифрувати. Зверніться до адміністратора.",
+        )
+
+    old_key = LicenseKey.objects.select_for_update().get(pk=order.generated_license_key_id)
+    if old_key.activation_count > 0:
+        raise BillingError(
+            "legacy_key_already_activated",
+            "Старий ключ уже активували, тому автоматичне перевидання може позбавити користувачів доступу.",
+        )
+
+    try:
+        plaintext, replacement = create_license_key(
+            order.plan,
+            max_activations=order.activation_count,
+            note=f"Reissued for purchase order {order.id}",
+        )
+    except LicenseServiceError as exc:
+        raise BillingError(exc.code, exc.detail)
+
+    old_key.active = False
+    old_key.save(update_fields=["active", "updated_at"])
+    order.generated_license_key = replacement
+    order.encrypted_license_key = encrypt_license_key(plaintext)
+    order.save(update_fields=["generated_license_key", "encrypted_license_key", "updated_at"])
+    return {"order": order, "plaintextKey": plaintext, "reissued": True}
 
 
 def _create_direct_checkout(order: PurchaseOrder) -> dict:
@@ -193,17 +283,17 @@ def _create_direct_checkout(order: PurchaseOrder) -> dict:
 
 def _verify_stripe_paid(session_id: str) -> None:
     if not settings.STRIPE_SECRET_KEY:
-        raise BillingError("stripe_not_configured", "Stripe test key не налаштований.")
+        raise BillingError("stripe_not_configured", "Stripe key не налаштований.")
     resp = requests.get(
         f"https://api.stripe.com/v1/checkout/sessions/{session_id}",
         auth=(settings.STRIPE_SECRET_KEY, ""),
         timeout=15,
     )
     if resp.status_code >= 400:
-        raise BillingError("stripe_session_failed", "Не вдалося перевірити Stripe сесію.")
+        raise BillingError("stripe_session_failed", "Не вдалося перевірити Stripe-сесію.")
     data = resp.json()
     if data.get("payment_status") != "paid":
-        raise BillingError("payment_not_paid", "Оплата ще не підтверджена.")
+        raise BillingError("payment_not_paid", "Оплату ще не підтверджено.")
 
 
 def _validate_plan_and_activation_count(plan: str, activation_count: int) -> tuple[LicensePlan, int]:
@@ -214,12 +304,15 @@ def _validate_plan_and_activation_count(plan: str, activation_count: int) -> tup
     except (TypeError, ValueError):
         raise BillingError("invalid_activation_count", "Кількість активацій має бути числом.")
     if activation_count < 1:
-        raise BillingError("invalid_activation_count", "Кількість активацій має бути не менше 1.")
+        raise BillingError("invalid_activation_count", "Кількість активацій має бути не меншою за 1.")
     if activation_count > MAX_ACTIVATIONS_PER_ORDER:
-        raise BillingError("activation_count_too_large", "Максимум 1000 активацій за одне замовлення.")
+        raise BillingError("activation_count_too_large", "Максимум 1000 активацій на одне замовлення.")
     plan_enum = LicensePlan(plan)
     if plan_enum == LicensePlan.FREE_1_DAY and activation_count != 1:
-        raise BillingError("free_plan_single_activation_only", "Free тариф доступний тільки на 1 активацію.")
+        raise BillingError(
+            "free_plan_single_activation_only",
+            "Безкоштовний тариф доступний лише для однієї активації.",
+        )
     return plan_enum, activation_count
 
 
