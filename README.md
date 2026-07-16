@@ -1,15 +1,15 @@
 # BizGuard
 
-BizGuard - сервіс для захисту Gmail від фішингу, шахрайства, небезпечних URL і вкладень. Проєкт складається зі спільного Django backend, основного BizGuard app з license gate та окремого purchase site для покупки бізнес-ключів.
+BizGuard - СЃРµСЂРІС–СЃ РґР»СЏ Р·Р°С…РёСЃС‚Сѓ Gmail РІС–Рґ С„С–С€РёРЅРіСѓ, С€Р°С…СЂР°Р№СЃС‚РІР°, РЅРµР±РµР·РїРµС‡РЅРёС… URL С– РІРєР»Р°РґРµРЅСЊ. РџСЂРѕС”РєС‚ СЃРєР»Р°РґР°С”С‚СЊСЃСЏ Р·С– СЃРїС–Р»СЊРЅРѕРіРѕ Django backend, РѕСЃРЅРѕРІРЅРѕРіРѕ BizGuard app Р· license gate С‚Р° РѕРєСЂРµРјРѕРіРѕ purchase site РґР»СЏ РїРѕРєСѓРїРєРё Р±С–Р·РЅРµСЃ-РєР»СЋС‡С–РІ.
 
-## Структура
+## РЎС‚СЂСѓРєС‚СѓСЂР°
 
 - `backend/` - Django REST API, Google OAuth, Gmail scan, license keys, billing, Celery tasks.
-- `apps/bizguard-app/` - основний застосунок BizGuard на `http://localhost:5173`.
-- `apps/purchase-site/` - сайт покупки ключів на `http://localhost:5174`.
-- `docker-compose.yml` - Postgres, Redis, backend, Celery, AI worker, Celery Beat і два frontend dev servers.
+- `apps/bizguard-app/` - РѕСЃРЅРѕРІРЅРёР№ Р·Р°СЃС‚РѕСЃСѓРЅРѕРє BizGuard РЅР° `http://localhost:5173`.
+- `apps/purchase-site/` - СЃР°Р№С‚ РїРѕРєСѓРїРєРё РєР»СЋС‡С–РІ РЅР° `http://localhost:5174`.
+- `docker-compose.yml` - Postgres, Redis, backend, Celery, AI worker, Celery Beat С– РґРІР° frontend dev servers.
 
-## Локальний запуск
+## Р›РѕРєР°Р»СЊРЅРёР№ Р·Р°РїСѓСЃРє
 
 ```powershell
 docker compose up -d --build
@@ -22,13 +22,13 @@ URL:
 - BizGuard app: `http://localhost:5173`
 - Backend API: `http://localhost:8000`
 
-Логи:
+Р›РѕРіРё:
 
 ```powershell
 docker compose logs -f backend celery_worker celery_ai_worker bizguard_app purchase_site
 ```
 
-Зупинка:
+Р—СѓРїРёРЅРєР°:
 
 ```powershell
 docker compose down
@@ -36,19 +36,19 @@ docker compose down
 
 ## AI analysis
 
-`celery_ai_worker` запускається разом зі звичайним compose, тому pending-листи не мають зависати без worker. Якщо локальна AI-модель Ollama недоступна, backend завершує лист deterministic fallback verdict/recommendations і не блокує весь batch.
+`celery_ai_worker` Р·Р°РїСѓСЃРєР°С”С‚СЊСЃСЏ СЂР°Р·РѕРј Р·С– Р·РІРёС‡Р°Р№РЅРёРј compose, С‚РѕРјСѓ pending-Р»РёСЃС‚Рё РЅРµ РјР°СЋС‚СЊ Р·Р°РІРёСЃР°С‚Рё Р±РµР· worker. РЇРєС‰Рѕ Р»РѕРєР°Р»СЊРЅР° AI-РјРѕРґРµР»СЊ Ollama РЅРµРґРѕСЃС‚СѓРїРЅР°, backend Р·Р°РІРµСЂС€СѓС” Р»РёСЃС‚ deterministic fallback verdict/recommendations С– РЅРµ Р±Р»РѕРєСѓС” РІРµСЃСЊ batch.
 
-Для повного local AI з Ollama запусти профіль:
+Р”Р»СЏ РїРѕРІРЅРѕРіРѕ local AI Р· Ollama Р·Р°РїСѓСЃС‚Рё РїСЂРѕС„С–Р»СЊ:
 
 ```powershell
 docker compose --profile local-ai up -d --build ollama ollama_pull celery_ai_worker
 ```
 
-Після цього натисни scan у BizGuard app або запусти queue через backend. Один повільний лист не блокує інші: timeout/pending reputation відкладається, batch іде далі, а лист отримує fallback після повторної невдалої спроби.
+РџС–СЃР»СЏ С†СЊРѕРіРѕ РЅР°С‚РёСЃРЅРё scan Сѓ BizGuard app Р°Р±Рѕ Р·Р°РїСѓСЃС‚Рё queue С‡РµСЂРµР· backend. РћРґРёРЅ РїРѕРІС–Р»СЊРЅРёР№ Р»РёСЃС‚ РЅРµ Р±Р»РѕРєСѓС” С–РЅС€С–: timeout/pending reputation РІС–РґРєР»Р°РґР°С”С‚СЊСЃСЏ, batch С–РґРµ РґР°Р»С–, Р° Р»РёСЃС‚ РѕС‚СЂРёРјСѓС” fallback РїС–СЃР»СЏ РїРѕРІС‚РѕСЂРЅРѕС— РЅРµРІРґР°Р»РѕС— СЃРїСЂРѕР±Рё.
 
 ## Google OAuth
 
-У Google Cloud Console для OAuth Client додай Authorized JavaScript origins:
+РЈ Google Cloud Console РґР»СЏ OAuth Client РґРѕРґР°Р№ Authorized JavaScript origins:
 
 ```text
 http://localhost:5173
@@ -64,25 +64,25 @@ http://localhost:8000/api/accounts/google/public-redirect
 http://localhost:8000/api/gmail/auth/callback/
 ```
 
-Purchase site використовує тільки `openid email profile` і не потребує license key. Основний BizGuard app використовує Gmail scope, тому Google акаунт має бути тестовим користувачем у local/test mode або додаток має пройти Google verification для production.
+Purchase site РІРёРєРѕСЂРёСЃС‚РѕРІСѓС” С‚С–Р»СЊРєРё `openid email profile` С– РЅРµ РїРѕС‚СЂРµР±СѓС” license key. РћСЃРЅРѕРІРЅРёР№ BizGuard app РІРёРєРѕСЂРёСЃС‚РѕРІСѓС” Gmail scope, С‚РѕРјСѓ Google Р°РєР°СѓРЅС‚ РјР°С” Р±СѓС‚Рё С‚РµСЃС‚РѕРІРёРј РєРѕСЂРёСЃС‚СѓРІР°С‡РµРј Сѓ local/test mode Р°Р±Рѕ РґРѕРґР°С‚РѕРє РјР°С” РїСЂРѕР№С‚Рё Google verification РґР»СЏ production.
 
 ## Stripe test billing
 
-Purchase site продає один бізнес-ключ на потрібну кількість активацій.
+Purchase site РїСЂРѕРґР°С” РѕРґРёРЅ Р±С–Р·РЅРµСЃ-РєР»СЋС‡ РЅР° РїРѕС‚СЂС–Р±РЅСѓ РєС–Р»СЊРєС–СЃС‚СЊ Р°РєС‚РёРІР°С†С–Р№.
 
-Ціни:
+Р¦С–РЅРё:
 
-- `free_1_day`: 0 грн, тільки 1 активація.
-- `half_year`: 499 грн база за першу активацію + 50 грн за кожну додаткову.
-- `year`: 899 грн база за першу активацію + 80 грн за кожну додаткову.
+- `free_1_day`: 0 РіСЂРЅ, С‚С–Р»СЊРєРё 1 Р°РєС‚РёРІР°С†С–СЏ.
+- `half_year`: 499 РіСЂРЅ Р±Р°Р·Р° Р·Р° РїРµСЂС€Сѓ Р°РєС‚РёРІР°С†С–СЋ + 50 РіСЂРЅ Р·Р° РєРѕР¶РЅСѓ РґРѕРґР°С‚РєРѕРІСѓ.
+- `year`: 899 РіСЂРЅ Р±Р°Р·Р° Р·Р° РїРµСЂС€Сѓ Р°РєС‚РёРІР°С†С–СЋ + 80 РіСЂРЅ Р·Р° РєРѕР¶РЅСѓ РґРѕРґР°С‚РєРѕРІСѓ.
 
-Формула:
+Р¤РѕСЂРјСѓР»Р°:
 
 ```text
 total = base + max(0, activationCount - 1) * extraSeatPrice
 ```
 
-Для Stripe test mode створи `.env` у корені проєкту:
+Р”Р»СЏ Stripe test mode СЃС‚РІРѕСЂРё `.env` Сѓ РєРѕСЂРµРЅС– РїСЂРѕС”РєС‚Сѓ:
 
 ```env
 BILLING_FAKE_MODE=False
@@ -90,39 +90,39 @@ STRIPE_SECRET_KEY=sk_test_...
 PURCHASE_SITE_URL=http://localhost:5174
 ```
 
-Після зміни `.env` пересоздай backend:
+РџС–СЃР»СЏ Р·РјС–РЅРё `.env` РїРµСЂРµСЃРѕР·РґР°Р№ backend:
 
 ```powershell
 docker compose up -d --force-recreate backend
 ```
 
-Тестова карта Stripe:
+РўРµСЃС‚РѕРІР° РєР°СЂС‚Р° Stripe:
 
 ```text
 4242 4242 4242 4242
 ```
 
-Дата - будь-яка майбутня, CVC - будь-який.
+Р”Р°С‚Р° - Р±СѓРґСЊ-СЏРєР° РјР°Р№Р±СѓС‚РЅСЏ, CVC - Р±СѓРґСЊ-СЏРєРёР№.
 
-## Як купити й активувати ключ
+## РЇРє РєСѓРїРёС‚Рё Р№ Р°РєС‚РёРІСѓРІР°С‚Рё РєР»СЋС‡
 
-1. Відкрий purchase site: `http://localhost:5174`.
-2. Увійди через Google.
-3. Обери тариф і кількість активацій.
-4. Оплати через Stripe Checkout test mode.
-5. На success screen скопіюй plaintext key. Повністю ключ показується тільки один раз.
-6. Відкрий BizGuard app: `http://localhost:5173`.
-7. Введи ключ перед Gmail login і підключи Google акаунт.
+1. Р’С–РґРєСЂРёР№ purchase site: `http://localhost:5174`.
+2. РЈРІС–Р№РґРё С‡РµСЂРµР· Google.
+3. РћР±РµСЂРё С‚Р°СЂРёС„ С– РєС–Р»СЊРєС–СЃС‚СЊ Р°РєС‚РёРІР°С†С–Р№.
+4. РћРїР»Р°С‚Рё С‡РµСЂРµР· Stripe Checkout test mode.
+5. РќР° success screen СЃРєРѕРїС–СЋР№ plaintext key. РџРѕРІРЅС–СЃС‚СЋ РєР»СЋС‡ РїРѕРєР°Р·СѓС”С‚СЊСЃСЏ С‚С–Р»СЊРєРё РѕРґРёРЅ СЂР°Р·.
+6. Р’С–РґРєСЂРёР№ BizGuard app: `http://localhost:5173`.
+7. Р’РІРµРґРё РєР»СЋС‡ РїРµСЂРµРґ Gmail login С– РїС–РґРєР»СЋС‡Рё Google Р°РєР°СѓРЅС‚.
 
-Seat-based логіка: той самий Google акаунт може входити повторно в межах строку дії ключа без списання нового місця. Інший Google акаунт списує одну активацію. Якщо місця вичерпані, новий акаунт отримає `activation_limit_reached`.
+Seat-based Р»РѕРіС–РєР°: С‚РѕР№ СЃР°РјРёР№ Google Р°РєР°СѓРЅС‚ РјРѕР¶Рµ РІС…РѕРґРёС‚Рё РїРѕРІС‚РѕСЂРЅРѕ РІ РјРµР¶Р°С… СЃС‚СЂРѕРєСѓ РґС–С— РєР»СЋС‡Р° Р±РµР· СЃРїРёСЃР°РЅРЅСЏ РЅРѕРІРѕРіРѕ РјС–СЃС†СЏ. Р†РЅС€РёР№ Google Р°РєР°СѓРЅС‚ СЃРїРёСЃСѓС” РѕРґРЅСѓ Р°РєС‚РёРІР°С†С–СЋ. РЇРєС‰Рѕ РјС–СЃС†СЏ РІРёС‡РµСЂРїР°РЅС–, РЅРѕРІРёР№ Р°РєР°СѓРЅС‚ РѕС‚СЂРёРјР°С” `activation_limit_reached`.
 
-## Тарифи BizGuard
+## РўР°СЂРёС„Рё BizGuard
 
-- Free: ручна перевірка останніх 5 листів, 1 день, без background monitoring.
-- Half-year: 15 листів, monitoring кожні 30 хв, auto-spam для Critical, High/Critical alerts.
-- Year: 30 листів, monitoring кожні 15 хв, priority AI, auto-spam для Critical, trusted sender/domain allowlist.
+- Free: СЂСѓС‡РЅР° РїРµСЂРµРІС–СЂРєР° РѕСЃС‚Р°РЅРЅС–С… 5 Р»РёСЃС‚С–РІ, 1 РґРµРЅСЊ, Р±РµР· background monitoring.
+- Half-year: 15 Р»РёСЃС‚С–РІ, monitoring РєРѕР¶РЅС– 30 С…РІ, auto-spam РґР»СЏ Critical, High/Critical alerts.
+- Year: 30 Р»РёСЃС‚С–РІ, monitoring РєРѕР¶РЅС– 15 С…РІ, priority AI, auto-spam РґР»СЏ Critical, trusted sender/domain allowlist.
 
-## Перевірки
+## РџРµСЂРµРІС–СЂРєРё
 
 Backend:
 
@@ -145,9 +145,9 @@ npm.cmd audit --omit=dev --prefix apps/bizguard-app
 npm.cmd audit --omit=dev --prefix apps/purchase-site
 ```
 
-## Безпека секретів
+## Р‘РµР·РїРµРєР° СЃРµРєСЂРµС‚С–РІ
 
-`.env`, `*.env`, Stripe keys, Google client secret, локальні бази, build artifacts і `node_modules` не мають потрапляти в git. Перед commit перевіряй:
+`.env`, `*.env`, Stripe keys, Google client secret, Р»РѕРєР°Р»СЊРЅС– Р±Р°Р·Рё, build artifacts С– `node_modules` РЅРµ РјР°СЋС‚СЊ РїРѕС‚СЂР°РїР»СЏС‚Рё РІ git. РџРµСЂРµРґ commit РїРµСЂРµРІС–СЂСЏР№:
 
 ```powershell
 git status --short
