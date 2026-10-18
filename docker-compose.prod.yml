@@ -1,0 +1,168 @@
+x-backend-environment: &backend-environment
+  DEBUG: "False"
+  API_DOCS_ENABLED: "False"
+  DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:?Set DJANGO_SECRET_KEY}
+  LICENSE_KEY_HASH_SECRET: ${LICENSE_KEY_HASH_SECRET:?Set LICENSE_KEY_HASH_SECRET}
+  BILLING_LICENSE_ENCRYPTION_SECRET: ${BILLING_LICENSE_ENCRYPTION_SECRET:?Set BILLING_LICENSE_ENCRYPTION_SECRET}
+  ALLOWED_HOSTS: ${ALLOWED_HOSTS:?Set ALLOWED_HOSTS}
+  CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:?Set CORS_ALLOWED_ORIGINS}
+  CSRF_TRUSTED_ORIGINS: ${CSRF_TRUSTED_ORIGINS:?Set CSRF_TRUSTED_ORIGINS}
+  DATABASE_URL: postgresql://${POSTGRES_USER:?Set POSTGRES_USER}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-bizguard}
+  REDIS_URL: redis://redis:6379/0
+  CELERY_BROKER_URL: redis://redis:6379/0
+  CELERY_RESULT_BACKEND: redis://redis:6379/0
+  GOOGLE_OAUTH_CLIENT_ID: ${GOOGLE_OAUTH_CLIENT_ID:?Set GOOGLE_OAUTH_CLIENT_ID}
+  GOOGLE_OAUTH_CLIENT_SECRET: ${GOOGLE_OAUTH_CLIENT_SECRET:?Set GOOGLE_OAUTH_CLIENT_SECRET}
+  GOOGLE_OAUTH_REDIRECT_URI: ${GOOGLE_OAUTH_REDIRECT_URI:?Set GOOGLE_OAUTH_REDIRECT_URI}
+  GOOGLE_PUBLIC_OAUTH_REDIRECT_URI: ${GOOGLE_PUBLIC_OAUTH_REDIRECT_URI:?Set GOOGLE_PUBLIC_OAUTH_REDIRECT_URI}
+  VIRUSTOTAL_API_KEY: ${VIRUSTOTAL_API_KEY:-}
+  STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+  BILLING_FAKE_MODE: ${BILLING_FAKE_MODE:-False}
+  BIZGUARD_APP_URL: ${BIZGUARD_APP_URL:?Set BIZGUARD_APP_URL}
+  PURCHASE_SITE_URL: ${PURCHASE_SITE_URL:?Set PURCHASE_SITE_URL}
+  AI_PROVIDER_ORDER: ${AI_PROVIDER_ORDER:-ollama}
+  AI_MESSAGE_TIME_BUDGET_SECONDS: ${AI_MESSAGE_TIME_BUDGET_SECONDS:-120}
+  OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
+  OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:1.5b}
+  OLLAMA_TIMEOUT_SECONDS: ${OLLAMA_TIMEOUT_SECONDS:-120}
+  OLLAMA_NUM_CTX: ${OLLAMA_NUM_CTX:-8192}
+  OLLAMA_NUM_PREDICT: ${OLLAMA_NUM_PREDICT:-512}
+  CELERY_WORKER_CONCURRENCY: ${CELERY_WORKER_CONCURRENCY:-4}
+  CELERY_AI_WORKER_CONCURRENCY: ${CELERY_AI_WORKER_CONCURRENCY:-1}
+  AI_QUEUE_MAX_PARALLEL_PER_ACCOUNT: ${AI_QUEUE_MAX_PARALLEL_PER_ACCOUNT:-1}
+
+x-backend-base: &backend-base
+  build: ./backend
+  restart: unless-stopped
+  environment: *backend-environment
+  depends_on:
+    postgres:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+  networks:
+    - bizguard_network
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-bizguard}
+      POSTGRES_USER: ${POSTGRES_USER:?Set POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB:-bizguard}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - bizguard_network
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - bizguard_network
+
+  backend:
+    <<: *backend-base
+    command: >-
+      sh -c "python manage.py migrate --noinput &&
+      python manage.py collectstatic --noinput &&
+      gunicorn config.wsgi:application --bind 0.0.0.0:8000
+      --workers 3 --timeout 120 --access-logfile -"
+
+  celery_worker:
+    <<: *backend-base
+    command: celery -A config worker --loglevel=info --queues=celery --concurrency=${CELERY_WORKER_CONCURRENCY:-4}
+    depends_on:
+      backend:
+        condition: service_started
+
+  celery_ai_worker:
+    <<: *backend-base
+    command: celery -A config worker --loglevel=info --queues=ai --concurrency=${CELERY_AI_WORKER_CONCURRENCY:-1} --prefetch-multiplier=1
+    depends_on:
+      backend:
+        condition: service_started
+
+  celery_beat:
+    <<: *backend-base
+    command: celery -A config beat --loglevel=info --schedule=/tmp/celerybeat-schedule
+    depends_on:
+      backend:
+        condition: service_started
+
+  ollama:
+    image: ollama/ollama:latest
+    restart: unless-stopped
+    environment:
+      OLLAMA_NUM_PARALLEL: 1
+      OLLAMA_MAX_LOADED_MODELS: 1
+    volumes:
+      - ollama_data:/root/.ollama
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    networks:
+      - bizguard_network
+
+  ollama_pull:
+    image: ollama/ollama:latest
+    restart: on-failure
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:1.5b}
+    command: pull ${OLLAMA_MODEL:-qwen2.5:1.5b}
+    depends_on:
+      ollama:
+        condition: service_healthy
+    networks:
+      - bizguard_network
+
+  bizguard_app:
+    build:
+      context: ./apps/bizguard-app
+      args:
+        VITE_PURCHASE_SITE_URL: ${PURCHASE_SITE_URL:?Set PURCHASE_SITE_URL}
+    restart: unless-stopped
+    ports:
+      - "${BIZGUARD_APP_HOST_PORT:-8080}:80"
+    depends_on:
+      - backend
+    networks:
+      - bizguard_network
+
+  purchase_site:
+    build:
+      context: ./apps/purchase-site
+      args:
+        VITE_BIZGUARD_APP_URL: ${BIZGUARD_APP_URL:?Set BIZGUARD_APP_URL}
+    restart: unless-stopped
+    ports:
+      - "${PURCHASE_SITE_HOST_PORT:-8081}:80"
+    depends_on:
+      - backend
+    networks:
+      - bizguard_network
+
+networks:
+  bizguard_network:
+
+volumes:
+  postgres_data:
+  redis_data:
+  ollama_data:

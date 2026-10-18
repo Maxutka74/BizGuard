@@ -1,5 +1,12 @@
 from django.contrib import admin
-from apps.gmail.models import EmailAccount, EmailMessage
+from apps.gmail.models import EmailAccount, EmailMessage, TrustedSenderRule
+
+
+@admin.register(TrustedSenderRule)
+class TrustedSenderRuleAdmin(admin.ModelAdmin):
+    list_display = ["user", "rule_type", "value", "active", "created_at"]
+    list_filter = ["rule_type", "active"]
+    search_fields = ["user__email", "value"]
 
 
 # @admin.register(EmailAccount)

@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import logging
 from typing import Optional, Dict, Any
+from urllib.parse import urlparse
 
-from apps.reputation.virustotal import fetch_domain_reputation
+from apps.reputation.service import get_domain_reputation
 
 logger = logging.getLogger(__name__)
 
@@ -12,7 +13,7 @@ logger = logging.getLogger(__name__)
 # DOMAIN ANALYSIS (SINGLE SOURCE OF TRUTH)
 # =========================================================
 
-def analyze_domain(domain: str) -> Dict[str, Any]:
+def analyze_domain(domain: str, allow_vt: bool = False) -> Dict[str, Any]:
     """
     Main domain risk analyzer.
 
@@ -23,7 +24,7 @@ def analyze_domain(domain: str) -> Dict[str, Any]:
     4. Domain scoring
     """
 
-    domain = (domain or "").lower().strip()
+    domain = _normalize_domain(domain)
 
     if not domain:
         return _fallback_domain_result()
@@ -32,7 +33,7 @@ def analyze_domain(domain: str) -> Dict[str, Any]:
     # 1. Fetch external intelligence (VirusTotal)
     # -----------------------------------------------------
     try:
-        vt = fetch_domain_reputation(domain)
+        vt = get_domain_reputation(domain, allow_live_vt=allow_vt)
     except Exception as exc:
         logger.warning("VirusTotal failed for %s: %s", domain, exc)
         return _fallback_domain_result()
@@ -40,7 +41,7 @@ def analyze_domain(domain: str) -> Dict[str, Any]:
     # -----------------------------------------------------
     # 2. Extract signals
     # -----------------------------------------------------
-    age_days: Optional[int] = vt.get("_vt", {}).get("creation_date")
+    age_days: Optional[int] = None
     lookalike: Optional[str] = vt.get("lookalikeDomain")
 
     # VirusTotal already gives initial reputation
@@ -63,6 +64,18 @@ def analyze_domain(domain: str) -> Dict[str, Any]:
         "lookalikeDomain": lookalike,
         "domainScore": score,
     }
+
+
+def _normalize_domain(value: str) -> str:
+    raw = (value or "").lower().strip()
+    if not raw:
+        return ""
+    if "://" in raw:
+        parsed = urlparse(raw)
+        raw = parsed.hostname or raw
+    else:
+        raw = raw.split("/", 1)[0].split("?", 1)[0]
+    return raw.strip().lstrip("www.").rstrip(".")
 
 
 # =========================================================
@@ -108,10 +121,11 @@ def classify_reputation(
         return "Suspicious"
 
     # -----------------------------------------------------
-    # 2. Trusted infrastructure = neutral, not safe
+    # 2. Trusted infrastructure stays inside the public API contract, but
+    # still receives a small non-zero domain score.
     # -----------------------------------------------------
     if root in TRUSTED_INFRA:
-        return "Neutral"
+        return "Trusted"
 
     # -----------------------------------------------------
     # 3. Base VT signal
@@ -121,6 +135,9 @@ def classify_reputation(
 
     if base_reputation == "Suspicious":
         return "Suspicious"
+
+    if base_reputation == "Trusted":
+        return "Trusted"
 
     # -----------------------------------------------------
     # 4. Age-based risk (important: phishing infra can age)
@@ -161,7 +178,7 @@ def compute_domain_score(
         score += 60
     elif reputation == "Suspicious":
         score += 35
-    elif reputation == "Neutral":
+    elif reputation == "Trusted":
         score += 10  # IMPORTANT: not zero trust
 
     # -----------------------------------------------------

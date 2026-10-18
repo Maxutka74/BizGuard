@@ -1,22 +1,121 @@
+# Environment variables and secrets
+.env
+.env.*
+*.env
+*.env.*
+!.env.example
+!.env.*.example
+!**/.env.example
+!**/.env.*.example
+*.pem
+*.key
+*.p12
+*.pfx
+
 # Python
 __pycache__/
 *.py[cod]
-*.env
+*$py.class
 .venv/
 venv/
+env/
+ENV/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.pyre/
+.hypothesis/
+.tox/
+.nox/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+*.egg-info/
+.eggs/
+build/
+wheelhouse/
 
-# Django
-*.log
-local_settings.py
+# Django and Celery runtime data
 db.sqlite3
+db.sqlite3-journal
+local_settings.py
 media/
+staticfiles/
+celerybeat-schedule
+celerybeat-schedule.*
+*.pid
 
-# Docker
-.env
+# Node.js and frontend builds
+node_modules/
+dist/
+.vite/
+.parcel-cache/
+.turbo/
+.next/
+.nuxt/
+coverage/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+*.tsbuildinfo
 
-# IDE
+# Logs and diagnostics
+*.log
+logs/
+crash.log
+
+# Docker local overrides and generated data
+docker-compose.override.yml
+.docker/
+
+# Databases, backups and local AI models
+*.sql
+*.sql.gz
+*.dump
+*.backup
+backups/
+models/
+*.gguf
+
+# IDE and editor files
 .idea/
+.vscode/
+*.iml
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+*.swp
+*.swo
+*~
 
-# OS
+# OS metadata
 .DS_Store
+._*
 Thumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Test and temporary files
+.cache/
+.tmp/
+tmp/
+temp/
+*.tmp
+*.temp
+*.bak
+
+# Screenshot with a visible one-time verification code; replace it with a redacted copy before publishing.
+screenshots/Screenshot9.png
+
+# Local agent/workspace metadata
+.agents/
+.codex/
+
+# Obsolete local copies and repository backups
+.git.bak-*/
+frontend/
+apps/*/.git.simple/
+backend/.git.sample/

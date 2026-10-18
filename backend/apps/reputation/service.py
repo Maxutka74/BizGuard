@@ -1,7 +1,7 @@
 """
 Service layer for domain reputation lookups.
 
-Other Django apps (e.g. apps.analysis, apps.emails) should import
+The Gmail analysis pipeline should import
 `get_domain_reputation` from here rather than calling VirusTotal directly.
 The service implements cache-first logic backed by the DomainReputation model.
 """
@@ -9,17 +9,20 @@ The service implements cache-first logic backed by the DomainReputation model.
 from __future__ import annotations
 
 import logging
+import time
 from typing import Optional
 
+from django.conf import settings
 from django.utils import timezone
 
 from .models import DomainReputation
 from .virustotal import VirusTotalError, fetch_domain_reputation
 
 logger = logging.getLogger(__name__)
+_VT_DOMAIN_DISABLED_UNTIL = 0.0
 
 
-def get_domain_reputation(domain: str, force_refresh: bool = False) -> dict:
+def get_domain_reputation(domain: str, force_refresh: bool = False, allow_live_vt: bool = False) -> dict:
     """
     Return reputation data for *domain*, hitting the DB cache first.
 
@@ -51,12 +54,29 @@ def get_domain_reputation(domain: str, force_refresh: bool = False) -> dict:
         logger.debug("Cache hit for domain %s", domain)
         return _serialize(cached, from_cache=True)
 
+    if not allow_live_vt:
+        if cached:
+            result = _serialize(cached, from_cache=True)
+            result["error"] = "Live VirusTotal domain enrichment was skipped."
+            return result
+        return _local_domain_fallback(domain)
+
+    if time.time() < _VT_DOMAIN_DISABLED_UNTIL:
+        if cached:
+            result = _serialize(cached, from_cache=True)
+            result["error"] = "VirusTotal domain scan temporarily rate-limited."
+            return result
+        return _error_fallback(domain, "VirusTotal domain scan temporarily rate-limited.")
+
     # --- Live VirusTotal lookup --------------------------------------------
     logger.info("Fetching VirusTotal data for domain: %s", domain)
     try:
         vt_data = fetch_domain_reputation(domain)
     except VirusTotalError as exc:
-        logger.warning("VirusTotal error for %s: %s", domain, exc)
+        if _is_rate_limit_error(exc):
+            _disable_vt_domains()
+        else:
+            logger.warning("VirusTotal error for %s: %s", domain, exc)
         if cached:
             # Return stale cache rather than a hard failure
             result = _serialize(cached, from_cache=True)
@@ -125,3 +145,48 @@ def _error_fallback(domain: str, error_msg: str) -> dict:
         "cached": False,
         "error": error_msg,
     }
+
+
+def _local_domain_fallback(domain: str) -> dict:
+    trusted_infra = {
+        "gmail.com",
+        "google.com",
+        "microsoft.com",
+        "outlook.com",
+        "yahoo.com",
+        "apple.com",
+        "icloud.com",
+    }
+    if domain in trusted_infra:
+        return {
+            "domain": domain,
+            "domainAge": "Known infrastructure",
+            "domainReputation": "Trusted",
+            "domainScore": 10,
+            "lookalikeDomain": None,
+            "cached": False,
+            "error": "Live VirusTotal domain enrichment was skipped.",
+        }
+    return {
+        "domain": domain,
+        "domainAge": "Unknown",
+        "domainReputation": "Suspicious",
+        "domainScore": 30,
+        "lookalikeDomain": None,
+        "cached": False,
+        "error": "Live VirusTotal domain enrichment was skipped.",
+    }
+
+
+def _is_rate_limit_error(exc: Exception) -> bool:
+    return "rate limit" in str(exc).lower() or "429" in str(exc)
+
+
+def _disable_vt_domains() -> None:
+    global _VT_DOMAIN_DISABLED_UNTIL
+    now = time.time()
+    if now < _VT_DOMAIN_DISABLED_UNTIL:
+        return
+    seconds = int(getattr(settings, "VIRUSTOTAL_DISABLE_ON_RATE_LIMIT_SECONDS", 900))
+    _VT_DOMAIN_DISABLED_UNTIL = now + seconds
+    logger.warning("VirusTotal domain lookups rate-limited; pausing live domain scans for %ss.", seconds)

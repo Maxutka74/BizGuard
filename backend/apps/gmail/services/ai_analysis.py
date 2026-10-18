@@ -1,33 +1,11 @@
 from __future__ import annotations
 
-import os
 import re
-import time
-import json
 import logging
-from dataclasses import dataclass
-from typing import Optional, Dict, Any, List
+from typing import Dict, Any
+from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
-
-DEFAULT_GEMINI_MODEL = "gemini-2.0-flash"
-_GEMINI_DELAY = 4.0
-
-
-# =========================================================
-# RESULT MODEL
-# =========================================================
-
-@dataclass
-class AIAnalysisResult:
-    urgency: int
-    fear: int
-    credential_theft: int
-    financial_fraud: int
-    authority_impersonation: int
-    ai_score: int
-    ai_summary: str
-
 
 # =========================================================
 # NORMALIZER
@@ -46,6 +24,8 @@ def normalize_ai_result(data: Any) -> Dict[str, Any]:
         "authority_impersonation":data.get("authority_impersonation", data.get("authorityImpersonation", 0)),
         "ai_score":               data.get("ai_score", data.get("aiScore", 0)),
         "ai_summary":             data.get("ai_summary", data.get("aiSummary", "")),
+        "verdict":                data.get("verdict", ""),
+        "recommendations":         data.get("recommendations", []),
     }
 
 
@@ -54,6 +34,7 @@ def empty_ai_result() -> Dict[str, Any]:
         "urgency": 0, "fear": 0, "credential_theft": 0,
         "financial_fraud": 0, "authority_impersonation": 0,
         "ai_score": 0, "ai_summary": "No analysis available.",
+        "verdict": "", "recommendations": [],
     }
 
 
@@ -67,9 +48,9 @@ _URL_RE = re.compile(r"https?://[^\s<>\"')\]]+", re.IGNORECASE)
 def extract_link_domains(body: str) -> list[str]:
     domains = []
     for url in _URL_RE.findall(body or ""):
-        m = re.match(r"https?://([^/]+)", url, re.IGNORECASE)
-        if m:
-            host = m.group(1).lower().split("@")[-1].split(":")[0]
+        parsed = urlparse(url)
+        host = (parsed.hostname or "").lower()
+        if host:
             domains.append(host)
     return domains
 
@@ -123,7 +104,7 @@ _EMERGENCY_RULES: list[tuple] = [
      ["fear", "urgency"], 40),
 
     (re.compile(r"(\d+\s*(годин|hours?|год\.)\s*(на\s+підтвердж)?|"
-                r"протягом\s+\d+\s*год|within\s+\d+\s*hours?)", re.I | re.U),
+                r"протягом\s+\d+\s*(год|хв|хвилин)|within\s+\d+\s*(hours?|minutes?))", re.I | re.U),
      ["urgency"], 35),
 
     (re.compile(r"(оновіть?\s+(налаштування|безпеку|пароль)|update\s+security\s+settings|"
@@ -133,11 +114,29 @@ _EMERGENCY_RULES: list[tuple] = [
     (re.compile(r"(privat24|приват24|privatbank|приватбанк|monobank|монобанк)", re.I | re.U),
      ["authority_impersonation"], 35),
 
-    (re.compile(r"(введіть\s+логін|ввести\s+пароль|enter\s+your\s+(password|login)|"
-                r"log\s+in\s+to\s+confirm|confirm\s+your\s+account)", re.I | re.U),
+    (re.compile(r"(введіть\s+логін|введіть.{0,40}парол|ввести\s+пароль|"
+                r"введіть.{0,40}код\s+підтвердження|sms.{0,20}код|код.{0,20}sms|"
+                r"enter\s+your\s+(password|login)|log\s+in\s+to\s+confirm|confirm\s+your\s+account)",
+                re.I | re.U),
      ["credential_theft"], 30),
 ]
 
+
+
+def _has_severe_credential_extortion(text: str) -> bool:
+    """Detect explicit account-lock pressure plus credential/payment collection."""
+    lowered = (text or "").lower()
+    has_account_pressure = bool(re.search(
+        r"(акаунт|account|доступ|обліковий\s+запис).{0,80}(заблок|видален|suspend|blocked|deleted|terminated)|"
+        r"(заблок|видален|suspend|blocked|deleted|terminated).{0,80}(акаунт|account|доступ|обліковий\s+запис)",
+        lowered,
+        re.I | re.U,
+    ))
+    has_password = bool(re.search(r"(парол|password|login|sign[\s-]?in|увійд|вхід)", lowered, re.I | re.U))
+    has_code = bool(re.search(r"(код\s+підтвердження|sms|2fa|mfa|одноразовий\s+код|verification\s+code)", lowered, re.I | re.U))
+    has_payment = bool(re.search(r"(платіжн|банківськ|картк|card|payment|billing)", lowered, re.I | re.U))
+    has_deadline = bool(re.search(r"(протягом\s+\d+\s*(хв|хвилин|год)|within\s+\d+\s*(minutes?|hours?)|негайно|терміново|immediately|urgent)", lowered, re.I | re.U))
+    return has_account_pressure and has_deadline and has_password and (has_code or has_payment)
 
 def emergency_phishing_boost(
     text: str,
@@ -152,46 +151,18 @@ def emergency_phishing_boost(
                 score[f] = min(100, score.get(f, 0) + boost)
             logger.debug("Emergency rule matched → boost %s by %d", fields, boost)
 
+    if _has_severe_credential_extortion(t):
+        score["credential_theft"] = max(score.get("credential_theft", 0), 95)
+        score["urgency"] = max(score.get("urgency", 0), 85)
+        score["fear"] = max(score.get("fear", 0), 80)
+        score["authority_impersonation"] = max(score.get("authority_impersonation", 0), 65)
+        if re.search(r"(платіжн|банківськ|картк|card|payment|billing)", t, re.I | re.U):
+            score["financial_fraud"] = max(score.get("financial_fraud", 0), 70)
+        logger.debug("Emergency rule matched -> severe credential extortion floors applied")
     imp_boost = detect_sender_impersonation(sender, text, sender_domain)
     if imp_boost:
         score["authority_impersonation"] = min(100, score.get("authority_impersonation", 0) + imp_boost)
         score["credential_theft"] = min(100, score.get("credential_theft", 0) + imp_boost // 2)
-
-    return score
-
-
-# =========================================================
-# URL SCAN BOOST  ← NEW
-# =========================================================
-
-def url_scan_boost(score: Dict[str, Any], url_agg: dict) -> Dict[str, Any]:
-    """
-    Inject URL scan signals into AI dimension scores.
-    Called AFTER emergency_phishing_boost, before final ai_score computation.
-
-    url_agg is the dict returned by aggregate_url_scores().
-    """
-    url_score = url_agg.get("url_score", 0)
-    any_phishing  = url_agg.get("any_phishing", False)
-    any_malicious = url_agg.get("any_malicious", False)
-
-    if any_malicious:
-        # Definitive malicious URL → hard lift on credential_theft + authority
-        score["credential_theft"]        = max(score.get("credential_theft", 0), 85)
-        score["authority_impersonation"] = max(score.get("authority_impersonation", 0), 70)
-        score["urgency"]                 = max(score.get("urgency", 0), 60)
-        logger.debug("URL scan boost: malicious URL detected")
-
-    elif any_phishing:
-        score["credential_theft"]        = max(score.get("credential_theft", 0), 70)
-        score["authority_impersonation"] = max(score.get("authority_impersonation", 0), 55)
-        score["urgency"]                 = max(score.get("urgency", 0), 45)
-        logger.debug("URL scan boost: phishing URL detected")
-
-    elif url_score >= 50:
-        # Suspicious URL
-        score["credential_theft"] = max(score.get("credential_theft", 0), url_score - 10)
-        logger.debug("URL scan boost: suspicious URL score=%d", url_score)
 
     return score
 
@@ -277,223 +248,57 @@ def _heuristic_fallback(subject: str, sender: str, body: str, domain: str) -> Di
         authority_imp    = min(100, authority_imp + 15)
 
     ai_score = compute_ai_score(urgency, fear, credential_theft, financial_fraud, authority_imp)
+    ai_summary = _fallback_summary(
+        domain=domain,
+        ai_score=ai_score,
+        link_domains=link_domains,
+        credential_theft=credential_theft,
+        financial_fraud=financial_fraud,
+        authority_impersonation=authority_imp,
+        urgency=urgency,
+        fear=fear,
+    )
     return {
         "urgency": urgency, "fear": fear,
         "credential_theft": credential_theft, "financial_fraud": financial_fraud,
         "authority_impersonation": authority_imp, "ai_score": ai_score,
-        "ai_summary": f"Heuristic analysis (Gemini unavailable). Domain: {domain or 'unknown'}.",
+        "ai_summary": ai_summary,
     }
 
 
-# =========================================================
-# GEMINI CALL  — STRICT PROMPT
-# =========================================================
-
-_SYSTEM_PROMPT = """You are an expert cybersecurity analyst specialising in phishing, BEC, and social-engineering email detection.
-
-LANGUAGE: The email may be in ANY language (English, Ukrainian, Russian, Polish, etc.).
-Analyse MEANING and INTENT — not keyword presence. A Ukrainian-language phishing email is as dangerous as an English one.
-
-────────────────────────────────────────────────────────────
-FIVE THREAT DIMENSIONS  (each 0-100)
-────────────────────────────────────────────────────────────
-urgency
-  Pressure to act within a time limit. Deadlines, countdowns, "X hours", "today only".
-  → 0 = no time pressure   |  100 = extreme artificial deadline
-
-fear
-  Threat of negative consequences if the reader does NOT act.
-  Account blocking, service termination, legal action, loss of funds/bonuses.
-  → 0 = no fear tactic  |  100 = severe explicit threat
-
-credential_theft
-  ANY attempt to collect login credentials, 2FA codes, or account access.
-  Includes: QR-code scan (to "sync" or "verify"), device pairing,
-  2FA sync, "log in to confirm", phishing links, fake portals.
-  QR-code + 2FA/sync + deadline = TEXTBOOK phishing → score 85-100.
-  → 0 = no credential request  |  100 = blatant credential harvesting
-
-financial_fraud
-  Monetary lure or fraud: bonuses, prizes, refunds, invoices, wire transfers.
-  → 0 = no financial element  |  100 = clear financial fraud
-
-authority_impersonation
-  Pretending to be a bank, well-known brand, security team, government body,
-  or official service. Especially HIGH (85-100) when sent from a FREE email
-  provider (gmail.com, ukr.net, etc.) while claiming to be a bank or brand.
-  → 0 = clearly the real sender  |  100 = definitive impersonation
-
-────────────────────────────────────────────────────────────
-STRICT SCORING RULES  (non-negotiable)
-────────────────────────────────────────────────────────────
-1. QR-code phishing (scan QR / sync device / 2FA verification):
-   credential_theft ≥ 85, urgency ≥ 70, authority_impersonation ≥ 70
-
-2. Free email provider (gmail / yahoo / ukr.net) impersonating a bank or brand:
-   authority_impersonation ≥ 85
-
-3. "Account will be blocked/suspended in X hours":
-   fear ≥ 80, urgency ≥ 75
-
-4. Any combination of (urgency ≥ 60) + (bank/brand impersonation) + (credential request):
-   ALL three affected dimensions ≥ 70
-
-5. Mismatched link domain (URL domain ≠ claimed sender brand):
-   credential_theft ≥ 70, authority_impersonation ≥ 65
-
-6. Legitimate transactional email from a verified corporate domain with no suspicious signals:
-   ALL dimensions 0-15 max
-
-────────────────────────────────────────────────────────────
-SCALE REFERENCE
-────────────────────────────────────────────────────────────
-0-10   → No indicators, clearly legitimate
-11-39  → Minor / ambiguous indicators
-40-69  → Moderate — suspicious
-70-89  → Strong — high threat
-90-100 → Textbook / definitive malicious content
-
-────────────────────────────────────────────────────────────
-OUTPUT FORMAT  (strict JSON, no markdown, no code fences)
-────────────────────────────────────────────────────────────
-{
-  "urgency": <int 0-100>,
-  "fear": <int 0-100>,
-  "credential_theft": <int 0-100>,
-  "financial_fraud": <int 0-100>,
-  "authority_impersonation": <int 0-100>,
-  "ai_summary": "<2-4 sentences in the SAME LANGUAGE as the email body explaining the key threat indicators>"
-}"""
-
-
-def _gemini(subject: str, sender: str, body: str, domain: str,
-            api_key: str, url_context: str = "") -> Dict[str, Any]:
-    import requests as req
-
-    model = os.environ.get("GEMINI_MODEL", DEFAULT_GEMINI_MODEL)
-    url_api = (
-        f"https://generativelanguage.googleapis.com/v1beta/models/"
-        f"{model}:generateContent?key={api_key}"
-    )
-
-    link_domains = extract_link_domains(body)
-    links_note = ""
-    if link_domains:
-        links_note = (
-            f"Links in email point to: {', '.join(sorted(set(link_domains)))}. "
-            f"Sender domain is '{domain}'. Domain mismatch = strong phishing signal.\n"
+def _fallback_summary(
+    domain: str,
+    ai_score: int,
+    link_domains: set[str],
+    credential_theft: int,
+    financial_fraud: int,
+    authority_impersonation: int,
+    urgency: int,
+    fear: int,
+) -> str:
+    domain_label = domain or "unknown"
+    if ai_score < 20:
+        return (
+            "AI service is temporarily unavailable. The email was checked with local "
+            f"security rules: sender domain {domain_label}, no strong phishing indicators detected."
         )
 
-    # Inject URL scan results so Gemini has external verdict
-    url_scan_note = ""
-    if url_context:
-        url_scan_note = f"\n[EXTERNAL URL SCAN RESULTS]\n{url_context}\n"
+    findings = []
+    if credential_theft >= 30:
+        findings.append("credential request indicators")
+    if financial_fraud >= 30:
+        findings.append("financial fraud indicators")
+    if authority_impersonation >= 30:
+        findings.append("authority impersonation")
+    if urgency >= 30:
+        findings.append("urgency pressure")
+    if fear >= 30:
+        findings.append("fear tactics")
+    if link_domains:
+        findings.append(f"external link domains: {', '.join(sorted(link_domains))}")
 
-    user_prompt = (
-        f"From: {sender}\nSubject: {subject}\n"
-        f"Sender domain: {domain}\n"
-        f"{links_note}"
-        f"{url_scan_note}"
-        f"\nBody:\n{body[:4000]}"
+    return (
+        "AI service is temporarily unavailable. The email was checked with local "
+        f"security rules for sender domain {domain_label}; detected "
+        f"{'; '.join(findings) if findings else 'suspicious patterns'}."
     )
-
-    payload = {
-        "contents": [
-            {"role": "user", "parts": [{"text": _SYSTEM_PROMPT + "\n\n" + user_prompt}]}
-        ],
-        "generationConfig": {
-            "temperature": 0.05,       # very low — deterministic judgements
-            "maxOutputTokens": 512,
-            "responseMimeType": "application/json",
-        },
-    }
-
-    resp = req.post(url_api, json=payload, timeout=30)
-    if resp.status_code == 429:
-        logger.warning("Gemini 429, sleeping then retrying...")
-        time.sleep(_GEMINI_DELAY * 3)
-        resp = req.post(url_api, json=payload, timeout=30)
-
-    resp.raise_for_status()
-    raw = resp.json()
-
-    try:
-        parts   = raw["candidates"][0]["content"]["parts"]
-        text    = "".join(p.get("text", "") for p in parts).strip()
-    except (KeyError, IndexError) as exc:
-        raise ValueError(f"Unexpected Gemini response: {raw}") from exc
-
-    text = re.sub(r"^```(?:json)?", "", text).strip()
-    text = re.sub(r"```$", "", text).strip()
-
-    data = json.loads(text)
-    time.sleep(_GEMINI_DELAY)
-    return data
-
-
-# =========================================================
-# MAIN ENTRY POINT
-# =========================================================
-
-def analyse_email(
-    subject: str,
-    sender: str,
-    body: str,
-    domain: str,
-    url_scan_agg: Optional[dict] = None,   # ← NEW: from url_scan.aggregate_url_scores()
-) -> Dict[str, Any]:
-    """
-    Main analysis pipeline:
-      1. Try Gemini (with URL scan context injected into prompt)
-      2. Heuristic fallback if Gemini fails
-      3. Emergency rule boosts (always)
-      4. URL scan dimension boost (always, if url_scan_agg provided)
-      5. Recompute ai_score
-    """
-    api_key = os.environ.get("GEMINI_API_KEY")
-
-    # Build URL context string for Gemini prompt
-    url_context = ""
-    if url_scan_agg:
-        parts = []
-        if url_scan_agg.get("any_malicious"):
-            parts.append(f"MALICIOUS URLs found: {', '.join(url_scan_agg.get('malicious_urls', []))}")
-        if url_scan_agg.get("any_phishing") and not url_scan_agg.get("any_malicious"):
-            parts.append(f"PHISHING URLs found: {', '.join(url_scan_agg.get('phishing_urls', []))}")
-        if url_scan_agg.get("url_score", 0) >= 40:
-            parts.append(f"Highest URL risk score: {url_scan_agg['url_score']}/100")
-        if url_scan_agg.get("url_summary"):
-            parts.append(url_scan_agg["url_summary"])
-        url_context = "\n".join(parts)
-
-    raw_result = None
-    if api_key:
-        try:
-            raw_result = _gemini(subject, sender, body, domain, api_key, url_context=url_context)
-        except Exception as exc:
-            logger.warning("Gemini failed → heuristic fallback: %s", exc)
-
-    result = normalize_ai_result(raw_result) if raw_result is not None else _heuristic_fallback(subject, sender, body, domain)
-
-    # Emergency rule engine — always
-    result = emergency_phishing_boost(
-        text=f"{subject} {sender} {body}",
-        score=result,
-        sender=sender,
-        sender_domain=domain,
-    )
-
-    # URL scan dimension boost — always if data available
-    if url_scan_agg:
-        result = url_scan_boost(result, url_scan_agg)
-
-    # Recompute ai_score from final boosted dimensions
-    result["ai_score"] = compute_ai_score(
-        urgency=result["urgency"],
-        fear=result["fear"],
-        credential_theft=result["credential_theft"],
-        financial_fraud=result["financial_fraud"],
-        authority_impersonation=result["authority_impersonation"],
-    )
-
-    return result

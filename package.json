@@ -1,0 +1,11 @@
+{
+  "name": "bizguard-workspace",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "dev:bizguard": "npm --prefix apps/bizguard-app run dev -- --host 0.0.0.0",
+    "dev:purchase": "npm --prefix apps/purchase-site run dev -- --host 0.0.0.0",
+    "build:bizguard": "npm --prefix apps/bizguard-app run build",
+    "build:purchase": "npm --prefix apps/purchase-site run build"
+  }
+}
