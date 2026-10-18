@@ -65,6 +65,8 @@ BizGuard — вебзастосунок для захисту електронн
 
 ![Деталі аналізу листа](screenshots/Screenshot8.png)
 
+![Деталі аналізу листа](screenshots/Screenshot9.png)
+
 Пошук листів:
 
 ![Пошук листів у BizGuard](screenshots/Screenshot10.png)
