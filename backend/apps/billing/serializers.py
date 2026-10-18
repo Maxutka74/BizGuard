@@ -2,13 +2,7 @@ from rest_framework import serializers
 
 from .models import PurchaseOrder
 from .services import MAX_ACTIVATIONS_PER_ORDER
-
-
-PLAN_LABELS = {
-    "free_1_day": "Free на 1 день",
-    "half_year": "Пів року",
-    "year": "Рік",
-}
+from apps.licenses.models import PLAN_DISPLAY_LABELS
 
 
 class CheckoutSerializer(serializers.Serializer):
@@ -51,7 +45,7 @@ class PurchaseOrderSerializer(serializers.ModelSerializer):
         )
 
     def get_planLabel(self, obj):
-        return PLAN_LABELS.get(obj.plan, obj.plan)
+        return PLAN_DISPLAY_LABELS.get(obj.plan, obj.plan)
 
     def get_generatedLicense(self, obj):
         key = obj.generated_license_key
@@ -65,7 +59,7 @@ class PurchaseOrderSerializer(serializers.ModelSerializer):
             "key": plaintext,
             "canReissue": not obj.encrypted_license_key and key.activation_count == 0,
             "plan": key.plan,
-            "planLabel": PLAN_LABELS.get(key.plan, key.get_plan_display()),
+            "planLabel": PLAN_DISPLAY_LABELS.get(key.plan, key.get_plan_display()),
             "maxActivations": key.max_activations,
             "activationCount": key.activation_count,
             "remainingActivations": key.remaining_activations,

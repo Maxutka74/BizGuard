@@ -12,7 +12,7 @@ import {
     Paperclip,
     XCircle,
 } from "lucide-react";
-import { riskColors, riskBgColors, type RiskLevel } from "./mockData";
+import { riskColors, riskBgColors, type RiskLevel } from "./riskStyles";
 import { fetchEmailDetail, type EmailDetail as EmailDetailData } from "../../api/gmail";
 
 interface EmailDetailProps {
@@ -31,6 +31,12 @@ const repTranslations = {
     Trusted: "Надійний",
     Suspicious: "Підозрілий",
     Malicious: "Шкідливий",
+};
+
+const aiAssessmentLabels: Record<string, string> = {
+    benign: "Ознак фішингу в тексті немає",
+    review: "Потрібна перевірка",
+    phishing: "Ознаки фішингу",
 };
 
 const aiMetricLabels: Record<string, string> = {
@@ -160,6 +166,26 @@ function UrlScanSection({ email }: { email: EmailDetailData }) {
                                     {item.error}
                                 </p>
                             )}
+                            {item.resolved_url && (
+                                <p className="mt-2" style={{ color: "var(--muted-foreground)", fontSize: "0.72rem", overflowWrap: "anywhere" }}>
+                                    Кінцева адреса Google-форми: {item.resolved_url}
+                                </p>
+                            )}
+                            {item.form_resolution === "conflicting_reputation" && (
+                                <p className="mt-2" style={{ color: "#eab308", fontSize: "0.72rem" }}>
+                                    Оцінки короткого посилання й кінцевої форми суперечать одна одній. Потрібна окрема перевірка.
+                                </p>
+                            )}
+                            {item.form_resolution === "unresolved" && (
+                                <p className="mt-2" style={{ color: "#eab308", fontSize: "0.72rem" }}>
+                                    Кінцеву адресу форми не вдалося підтвердити; ризик короткого посилання не знижено.
+                                </p>
+                            )}
+                            {item.form_resolution === "destination_threat" && (
+                                <p className="mt-2" style={{ color: "#ef4444", fontSize: "0.72rem" }}>
+                                    Кінцева форма також має небезпечну репутацію.
+                                </p>
+                            )}
                         </div>
                     );
                 })}
@@ -279,7 +305,9 @@ function SpamActionBanner({ email }: { email: EmailDetailData }) {
           ? "Автоспам пропущено"
           : "Не вдалося перенести у спам";
     const body = moved
-        ? "Критичний лист автоматично прибрано з INBOX через Gmail."
+        ? email.riskLevel === "Critical"
+          ? "Лист було автоматично перенесено до спаму в Gmail після критичної оцінки."
+          : "Лист перенесли до спаму за попередньою оцінкою. Після повторного аналізу ризик нижчий; за потреби поверніть лист зі спаму вручну в Gmail."
         : skipped
           ? "Відправник або домен є у списку дозволених."
           : email.spamActionError || "Потрібно перепідключити Google для автоматичного перенесення у спам.";
@@ -505,6 +533,8 @@ export function EmailDetail({ emailId, onBack }: EmailDetailProps) {
         Safe: <CheckCircle className="w-5 h-5" style={{ color: "#22c55e" }} />,
     };
     const hasAiVerdict = email.analysis_status === "done" && Boolean(email.verdict);
+    const analysisEvidence = email.securitySignals?.analysisEvidence as { model_assessment?: string } | undefined;
+    const aiAssessment = analysisEvidence?.model_assessment;
     const aiPending = email.analysis_status !== "done";
     const statusColor = aiPending ? "#60a5fa" : riskColors[email.riskLevel];
     const statusBg = aiPending ? "rgba(59,130,246,0.12)" : riskBgColors[email.riskLevel];
@@ -751,7 +781,7 @@ export function EmailDetail({ emailId, onBack }: EmailDetailProps) {
                                         letterSpacing: "0.06em",
                                     }}
                                 >
-                  {hasAiVerdict ? "AI-аналіз" : (email.analysisSource ?? "очікує AI")}
+                  {hasAiVerdict ? "AI-аналіз" : (email.analysisSource ?? "Очікує AI")}
                 </span>
                             </h3>
                         </div>
@@ -792,6 +822,16 @@ export function EmailDetail({ emailId, onBack }: EmailDetailProps) {
                             <p style={{ color: "var(--foreground)", fontSize: "0.875rem", lineHeight: 1.65 }}>
                                 {hasAiVerdict ? email.verdict : "AI-аналізує лист. Фінальний вердикт ще не готовий."}
                             </p>
+                            {hasAiVerdict && email.aiSummary && email.aiSummary !== email.verdict && (
+                                <p className="mt-2" style={{ color: "var(--muted-foreground)", fontSize: "0.8rem", lineHeight: 1.6 }}>
+                                    {email.aiSummary}
+                                </p>
+                            )}
+                            {hasAiVerdict && aiAssessment && (
+                                <p className="mt-2" style={{ color: "var(--muted-foreground)", fontSize: "0.75rem" }}>
+                                    Висновок AI після перевірки доказів: {aiAssessmentLabels[aiAssessment] ?? aiAssessment}.
+                                </p>
+                            )}
                         </div>
 
                     </div>
@@ -819,10 +859,10 @@ export function EmailDetail({ emailId, onBack }: EmailDetailProps) {
                         <RiskMeter score={email.threatScore} level={email.riskLevel} pending={aiPending} />
                         <div className="w-full mt-6 space-y-2.5">
                             {[
-                                { label: "Оцінка ШІ", value: email.aiScore, weight: "70%" },
-                                { label: "Оцінка домену", value: email.domainScore, weight: "30%" },
-                                { label: "URL / репутація", value: email.urlScore ?? 0, weight: "signal" },
-                                { label: "Вкладення", value: email.attachmentScore ?? 0, weight: "signal" },
+                                { label: "Оцінка ШІ", value: email.aiScore, weight: "Контекст" },
+                                { label: "Оцінка домену", value: email.domainScore, weight: "Сигнал" },
+                                { label: "URL / репутація", value: email.urlScore ?? 0, weight: "Сигнал" },
+                                { label: "Вкладення", value: email.attachmentScore ?? 0, weight: "Сигнал" },
                             ].map(({ label, value, weight }) => (
                                 <div key={label} className="flex items-center justify-between">
                                     <div>

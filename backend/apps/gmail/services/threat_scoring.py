@@ -52,10 +52,14 @@ def compute_threat_result(
     any_malicious_attachment: bool = False,
     email_context: str | None = None,
     explicit_security_intent: bool = False,
+    header_score: int = 0,
+    ai_assessment: str | None = None,
+    content_phishing_evidence: bool = False,
+    url_review_needed: bool = False,
 ) -> ThreatResult:
     """Combine AI, domain, URL and attachment evidence into one verdict."""
     ai_score = clamp(ai_score)
-    domain_score = clamp(domain_score)
+    domain_score = max(clamp(domain_score), clamp(header_score))
     url_score = clamp(url_score)
     attachment_score = clamp(attachment_score)
     credential_theft = clamp(credential_theft)
@@ -79,12 +83,17 @@ def compute_threat_result(
     else:
         threat_score = clamp(round(ai_score * 0.75 + domain_score * 0.25))
 
+    benign_context = email_context in BENIGN_EMAIL_CONTEXTS
     if any_malicious_url:
         threat_score = max(threat_score, 70)
     elif any_phishing_url:
         threat_score = max(threat_score, 55)
+    elif url_score >= 40 and (url_review_needed or not benign_context):
+        threat_score = max(threat_score, 35)
 
-    benign_context = email_context in BENIGN_EMAIL_CONTEXTS
+    if ai_assessment == "phishing" and content_phishing_evidence:
+        threat_score = max(threat_score, 61)
+
     if any_malicious_attachment or attachment_score >= 75:
         threat_score = max(threat_score, 65)
     elif not benign_context and (any_suspicious_attachment or attachment_score >= 45):
@@ -107,7 +116,11 @@ def compute_threat_result(
         threat_score = max(threat_score, 82)
 
     strong_url = any_malicious_url and url_score >= 80
-    strong_ai = credential_theft >= 85 and (urgency >= 70 or authority_impersonation >= 75)
+    strong_ai = (
+        credential_theft >= 85
+        and (urgency >= 70 or authority_impersonation >= 75)
+        and (content_phishing_evidence or ai_assessment is None)
+    )
     strong_file = any_malicious_attachment and attachment_score >= 80
     if strong_file or (strong_url and strong_ai):
         threat_score = max(threat_score, 82)
@@ -124,6 +137,13 @@ def compute_threat_result(
             or has_strong_url
         ):
             threat_score = min(threat_score, 30)
+
+    # An external URL finding is independent caution, not a second AI vote.
+    # Review or benign content must not become Critical from that URL alone.
+    if ai_assessment in {"benign", "review"} and not content_phishing_evidence and not any_malicious_attachment:
+        threat_score = min(threat_score, 80)
+    if url_review_needed:
+        threat_score = max(threat_score, 35)
 
     threat_score = clamp(threat_score)
     return ThreatResult(

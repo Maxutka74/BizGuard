@@ -9,7 +9,7 @@ from django.core import signing
 from django.db import IntegrityError, transaction
 from django.utils import timezone
 
-from .models import LicenseActivation, LicenseKey, LicensePlan, PLAN_DURATION_DAYS
+from .models import LicenseActivation, LicenseKey, LicensePlan, PLAN_DISPLAY_LABELS, PLAN_DURATION_DAYS
 
 GATE_TOKEN_SALT = "apps.licenses.gate-token"
 KEY_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
@@ -343,7 +343,7 @@ def get_license_plans() -> list[dict]:
     return [
         {
             "plan": plan.value,
-            "planLabel": plan.label,
+            "planLabel": PLAN_DISPLAY_LABELS[plan],
             "durationDays": PLAN_DURATION_DAYS[plan],
             "capabilities": get_plan_capabilities(plan.value),
         }
@@ -361,7 +361,7 @@ def get_user_capabilities(user) -> dict:
 def license_key_preview(license_key: LicenseKey) -> dict:
     return {
         "plan": license_key.plan,
-        "planLabel": license_key.get_plan_display(),
+        "planLabel": PLAN_DISPLAY_LABELS.get(license_key.plan, license_key.get_plan_display()),
         "durationDays": license_key.duration_days,
         "capabilities": get_plan_capabilities(license_key.plan),
         "maxActivations": license_key.max_activations,
@@ -385,7 +385,7 @@ def _status_payload(status: str, activation: LicenseActivation) -> dict:
     return {
         "status": status,
         "plan": activation.license_key.plan,
-        "planLabel": activation.license_key.get_plan_display(),
+        "planLabel": PLAN_DISPLAY_LABELS.get(activation.license_key.plan, activation.license_key.get_plan_display()),
         "expiresAt": activation.expires_at.isoformat(),
         "activatedAt": activation.activated_at.isoformat(),
         "confirmationRequired": status == "confirmation_required",

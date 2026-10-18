@@ -12,6 +12,13 @@ class LicensePlan(models.TextChoices):
     YEAR = "year", "1 year"
 
 
+PLAN_DISPLAY_LABELS = {
+    LicensePlan.FREE_1_DAY: "Free на 1 день",
+    LicensePlan.HALF_YEAR: "Пів року",
+    LicensePlan.YEAR: "Рік",
+}
+
+
 PLAN_DURATION_DAYS = {
     LicensePlan.FREE_1_DAY: 1,
     LicensePlan.HALF_YEAR: 183,

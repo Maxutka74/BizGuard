@@ -107,6 +107,9 @@ temp/
 *.temp
 *.bak
 
+# Screenshot with a visible one-time verification code; replace it with a redacted copy before publishing.
+screenshots/Screenshot9.png
+
 # Local agent/workspace metadata
 .agents/
 .codex/

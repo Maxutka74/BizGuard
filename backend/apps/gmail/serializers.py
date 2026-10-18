@@ -105,6 +105,10 @@ class EmailDetailSerializer(serializers.ModelSerializer):
     def get_aiSummary(self, obj):
         if obj.analysis_status != "done":
             return ""
+        # Version 8+ summaries are generated from the final verified risk,
+        # never copied from the model or the email body.
+        if obj.analysisVersion >= 8 and obj.aiSummary:
+            return obj.aiSummary
         return final_summary_for_risk(obj.aiSummary, obj.riskLevel)
 
     def get_recommendations(self, obj):

@@ -17,6 +17,8 @@ from .services import (
     create_gate_token,
     create_license_key,
     get_plan_capabilities,
+    get_license_plans,
+    license_key_preview,
     validate_license_key,
 )
 
@@ -103,6 +105,16 @@ class LicenseServiceTests(TestCase):
         self.assertTrue(get_plan_capabilities(LicensePlan.HALF_YEAR)["autoSpamCritical"])
         self.assertTrue(get_plan_capabilities(LicensePlan.YEAR)["priorityAi"])
         self.assertTrue(get_plan_capabilities(LicensePlan.YEAR)["trustedSenderAllowlist"])
+
+    def test_plan_labels_are_ukrainian_and_consistent(self):
+        labels = {item["plan"]: item["planLabel"] for item in get_license_plans()}
+        self.assertEqual(labels, {
+            "free_1_day": "Free на 1 день",
+            "half_year": "Пів року",
+            "year": "Рік",
+        })
+        _, key = create_license_key(LicensePlan.YEAR)
+        self.assertEqual(license_key_preview(key)["planLabel"], labels["year"])
 
     def test_multi_use_key_activates_multiple_users(self):
         plaintext, license_key = create_license_key(LicensePlan.HALF_YEAR, max_activations=2)

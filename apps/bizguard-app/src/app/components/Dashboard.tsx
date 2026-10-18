@@ -14,7 +14,7 @@ import {
     Plus,
     Trash2,
 } from "lucide-react";
-import { riskColors, riskBgColors, type RiskLevel } from "./mockData";
+import { riskColors, riskBgColors, type RiskLevel } from "./riskStyles";
 import {
     fetchEmails,
     fetchEmailProgress,
@@ -122,6 +122,18 @@ function formatDate(value?: string | null) {
         month: "short",
         year: "numeric",
     });
+}
+
+function formatScanDateTime(value: string) {
+    const parts = new Intl.DateTimeFormat("uk-UA", {
+        day: "2-digit",
+        month: "short",
+        hour: "2-digit",
+        minute: "2-digit",
+    }).formatToParts(new Date(value));
+    const part = (type: Intl.DateTimeFormatPartTypes) =>
+        parts.find((item) => item.type === type)?.value ?? "";
+    return `${part("day")} ${part("month")} ${part("hour")}:${part("minute")}`;
 }
 const emptyEmailStats: EmailStats = {
     total: 0,
@@ -621,30 +633,30 @@ export function Dashboard({ user, onSelectEmail, onLogout }: DashboardProps) {
 
                         <div className="grid md:grid-cols-3 gap-3 p-5">
                             {[
-                                ["Ручна перевірка", `останні ${scanLimit} листів`],
+                                ["Ручна перевірка", `Останні ${scanLimit} листів`],
                                 [
                                     "Вікно моніторингу",
                                     capabilities?.autoMonitor
                                         ? `${capabilities?.recentLookbackDays ?? 1} дн.`
-                                        : "без фонового моніторингу",
+                                        : "Без фонового моніторингу",
                                 ],
                                 [
                                     "Підтвердження ключа",
                                     capabilities?.monthlyConfirmation
-                                        ? `до ${formatDate(user?.license?.confirmationDueAt)}`
-                                        : "не потрібне",
+                                        ? `До ${formatDate(user?.license?.confirmationDueAt)}`
+                                        : "Не потрібне",
                                 ],
                                 ["URL за лист", `${capabilities?.maxUrlsPerEmail ?? 0}`],
                                 ["Вкладення за лист", `${capabilities?.maxAttachmentsPerEmail ?? 0}`],
-                                ["AI-черга", capabilities?.priorityAi ? "пріоритетна" : "стандартна"],
-                                ["Автоспам критичних", capabilities?.autoSpamCritical ? "увімкнено" : "недоступно"],
-                                ["Дозволені домени", capabilities?.trustedSenderAllowlist ? "увімкнено" : "недоступно"],
-                                ["Пріоритетна повторна перевірка", capabilities?.priorityRecheck ? "увімкнено" : "стандартна"],
+                                ["AI-черга", capabilities?.priorityAi ? "Пріоритетна" : "Стандартна"],
+                                ["Автоспам критичних", capabilities?.autoSpamCritical ? "Увімкнено" : "Недоступно"],
+                                ["Дозволені домени", capabilities?.trustedSenderAllowlist ? "Увімкнено" : "Недоступно"],
+                                ["Пріоритетна повторна перевірка", capabilities?.priorityRecheck ? "Увімкнено" : "Стандартна"],
                                 [
                                     "Активації ключа",
                                     user?.license?.maxActivations
-                                        ? `${user.license.activationCount}/${user.license.maxActivations} використано`
-                                        : "немає даних",
+                                        ? `Використано ${user.license.activationCount}/${user.license.maxActivations}`
+                                        : "Немає даних",
                                 ],
                             ].map(([label, value]) => (
                                 <div
@@ -730,7 +742,7 @@ export function Dashboard({ user, onSelectEmail, onLogout }: DashboardProps) {
                                                     <div className="min-w-0">
                                                         <p style={{ color: "var(--foreground)", fontSize: "0.84rem", overflowWrap: "anywhere" }}>{rule.value}</p>
                                                         <p style={{ color: "var(--muted-foreground)", fontSize: "0.68rem", marginTop: 2 }}>
-                                                            {rule.rule_type === "domain" ? "Домен" : "Email"} · {rule.active ? "активне" : "вимкнене"}
+                                                            {rule.rule_type === "domain" ? "Домен" : "Email"} · {rule.active ? "Активне" : "Вимкнене"}
                                                         </p>
                                                     </div>
                                                     <button
@@ -790,11 +802,11 @@ export function Dashboard({ user, onSelectEmail, onLogout }: DashboardProps) {
                                         >
                                             <span>{plan.planLabel}</span>
                                             <span>{plan.durationDays} дн.</span>
-                                            <span>{caps.autoMonitor ? `${caps.autoMonitorIntervalMinutes} хв` : "ручний"}</span>
-                                            <span>останні {caps.maxMessagesPerRun}</span>
-                                            <span>{caps.autoMonitor ? `${caps.recentLookbackDays} дн.` : "немає"}</span>
+                                            <span>{caps.autoMonitor ? `${caps.autoMonitorIntervalMinutes} хв` : "Ручний"}</span>
+                                            <span>Останні {caps.maxMessagesPerRun}</span>
+                                            <span>{caps.autoMonitor ? `${caps.recentLookbackDays} дн.` : "Немає"}</span>
                                             <span>
-                                                до {caps.maxUrlsPerEmail} URL / до {caps.maxAttachmentsPerEmail} вклад.
+                                                До {caps.maxUrlsPerEmail} URL / до {caps.maxAttachmentsPerEmail} вклад.
                                                 {caps.autoSpamCritical ? " / автоспам" : ""}
                                                 {caps.trustedSenderAllowlist ? " / дозволені домени" : ""}
                                             </span>
@@ -978,12 +990,7 @@ export function Dashboard({ user, onSelectEmail, onLogout }: DashboardProps) {
                             }}
                         >
                             Востаннє відскановано:{" "}
-                            {new Date(stats.lastScannedAt).toLocaleString("uk-UA", {
-                                day: "2-digit",
-                                month: "short",
-                                hour: "2-digit",
-                                minute: "2-digit",
-                            })}
+                            {formatScanDateTime(stats.lastScannedAt)}
                         </p>
                     )}
                 </div>

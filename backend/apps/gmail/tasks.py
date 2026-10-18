@@ -94,7 +94,7 @@ try:
             finalize_saved_email_with_local_fallback,
         )
 
-        time_budget_seconds = max(1.0, float(getattr(settings, "AI_MESSAGE_TIME_BUDGET_SECONDS", 30)))
+        time_budget_seconds = max(1.0, float(getattr(settings, "AI_MESSAGE_TIME_BUDGET_SECONDS", 120)))
         lock_key = f"gmail:ai-message-lock:{message_id}"
         attempt_key = f"gmail:ai-message-attempt:{message_id}:v{ANALYSIS_VERSION}"
         lock_ttl = int(max(90, time_budget_seconds * 3))
@@ -231,8 +231,8 @@ try:
 
         max_batch_setting = int(getattr(settings, "AI_QUEUE_MAX_BATCH", 30))
         max_batch = max(1, min(int(max_batch or max_batch_setting), max_batch_setting, 100))
-        parallel_cap = max(1, int(getattr(settings, "AI_QUEUE_MAX_PARALLEL_PER_ACCOUNT", 2)))
-        time_budget_seconds = max(1.0, float(getattr(settings, "AI_MESSAGE_TIME_BUDGET_SECONDS", 30)))
+        parallel_cap = max(1, int(getattr(settings, "AI_QUEUE_MAX_PARALLEL_PER_ACCOUNT", 1)))
+        time_budget_seconds = max(1.0, float(getattr(settings, "AI_MESSAGE_TIME_BUDGET_SECONDS", 120)))
         stale_after_seconds = max(
             1,
             int(getattr(settings, "AI_PROCESSING_STALE_SECONDS", max(90, int(time_budget_seconds * 3)))),

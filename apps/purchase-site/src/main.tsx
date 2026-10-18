@@ -80,39 +80,39 @@ const plans: Array<{
 }> = [
   {
     id: 'free_1_day',
-    title: 'Free',
+    title: 'Free на 1 день',
     price: '0 грн',
-    period: '1 день доступу',
+    period: 'Доступ на 1 день',
     badge: 'Тест сервісу',
     description: 'Швидкий тест BizGuard на невеликій кількості листів перед покупкою бізнес-ключа.',
     accent: 'soft',
     baseAmount: 0,
     extraSeatAmount: 0,
-    features: ['1 активація', '5 останніх листів', 'Ручна перевірка Gmail', 'Базовий AI-вердикт', 'Без real-time моніторингу'],
+    features: ['Одна активація', 'Останні 5 листів', 'Ручна перевірка Gmail', 'Базовий AI-вердикт', 'Без фонового моніторингу'],
   },
   {
     id: 'half_year',
-    title: '6 місяців',
+    title: 'Пів року',
     price: '499 грн',
-    period: 'пів року захисту',
+    period: 'Пів року захисту',
     badge: 'Оптимальний старт',
     description: 'Регулярний захист для особистої пошти, малого бізнесу або невеликої команди.',
     accent: 'blue',
     baseAmount: 49900,
     extraSeatAmount: 5000,
-    features: ['15 останніх листів', 'Моніторинг кожні 30 хв', 'Auto-spam для Critical', 'Панель High/Critical загроз'],
+    features: ['Останні 15 листів', 'Моніторинг кожні 30 хв', 'Автоспам критичних листів', 'Панель високих і критичних загроз'],
   },
   {
     id: 'year',
-    title: '1 рік',
+    title: 'Рік',
     price: '899 грн',
-    period: 'максимальний захист',
+    period: 'Максимальний захист',
     badge: 'Найкращий вибір',
     description: 'Пріоритетний AI-аналіз, allowlist і глибша перевірка загроз для команди.',
     accent: 'green',
     baseAmount: 89900,
     extraSeatAmount: 8000,
-    features: ['30 останніх листів', 'Моніторинг кожні 15 хв', 'Priority AI batch', 'Дозволені домени та allowlist'],
+    features: ['Останні 30 листів', 'Моніторинг кожні 15 хв', 'Пріоритетна AI-черга', 'Дозволені домени та відправники'],
   },
 ]
 
@@ -672,7 +672,7 @@ function OrderRow({
           ) : (
             <small>Повний старий ключ неможливо відновити, оскільки він уже використовувався. Зверніться до адміністратора для ручної заміни.</small>
           )}
-          <small>{license.activationCount}/{license.maxActivations} використано · залишилось {license.remainingActivations}</small>
+          <small>Використано {license.activationCount}/{license.maxActivations} · Залишилося {license.remainingActivations}</small>
         </div>
       ) : (
         <div className="license-preview pending-license">

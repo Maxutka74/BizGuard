@@ -57,6 +57,8 @@ class BillingTests(TestCase):
         self.assertTrue(complete.data["plaintextKey"].startswith("BG-"))
         self.assertEqual(complete.data["order"]["activationCount"], 3)
         self.assertEqual(complete.data["order"]["generatedLicense"]["maxActivations"], 3)
+        self.assertEqual(complete.data["order"]["planLabel"], "Пів року")
+        self.assertEqual(complete.data["order"]["generatedLicense"]["planLabel"], "Пів року")
         self.assertEqual(LicenseKey.objects.count(), 1)
 
         again = self.client.post("/api/billing/complete", {"sessionId": checkout.data["sessionId"]}, format="json")

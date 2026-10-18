@@ -6,12 +6,14 @@ import time
 from email.utils import parseaddr
 from urllib.parse import urlparse
 from django.conf import settings
+from django.db import transaction
 from django.utils import timezone
 
 from apps.gmail.models import EmailAccount, EmailMessage, TrustedSenderRule
 from apps.gmail.services.gmail_fetcher import fetch_inbox_messages
 from apps.gmail.services.queue import enqueue_ai_queue
 from apps.gmail.services.oauth import build_gmail_service
+from apps.gmail.services.phishing_evidence import calibrate_phishing_scores, technical_context_for_ai
 
 from apps.gmail.services.ai_analysis import (
     extract_link_domains,
@@ -20,6 +22,7 @@ from apps.gmail.services.ai_analysis import (
 
 from apps.gmail.services.ai_providers import (
     AIAnalysisTimedOut,
+    AIProviderUnavailable,
     ANALYSIS_SOURCE_DONE,
     analyze_email_with_providers,
     completed_local_fallback_result,
@@ -38,7 +41,7 @@ from apps.reputation.url_service import empty_url_scan_summary, extract_meaningf
 from apps.gmail.services.threat_scoring import compute_threat_result
 
 logger = logging.getLogger(__name__)
-ANALYSIS_VERSION = 6
+ANALYSIS_VERSION = 8
 
 TRUSTED_BRAND_GROUPS = [
     {"leetcode.com"},
@@ -592,34 +595,18 @@ def _final_verdict_for_risk(risk_level: str) -> str:
     return final_verdict_for_risk(risk_level)
 
 
-def _summary_conflicts_with_risk(summary: str) -> bool:
-    lowered = (summary or "").lower()
-    safe_markers = (
-        "safe",
-        "legitimate",
-        "no phishing",
-        "безпеч",
-        "легітим",
-        "ознак фішингу не виявлено",
-        "не виявлено ознак фішингу",
+def _calibrate_message_ai(ai_result: dict, message: EmailMessage, *, require_model_evidence: bool) -> dict:
+    calibrated = calibrate_phishing_scores(
+        ai_result, message, require_model_evidence=require_model_evidence,
     )
-    return any(marker in lowered for marker in safe_markers)
-
-
-def _final_summary_for_risk(summary: str, risk_level: str) -> str:
-    summary = (summary or "").strip()
-    if risk_level == "Safe":
-        return summary
-    if summary and not _summary_conflicts_with_risk(summary):
-        return summary
-    return (
-        "Фінальна оцінка врахувала підозрілі сигнали домену, URL, вкладень "
-        "або вмісту листа. Не виконуйте дії з листа без перевірки через офіційний канал."
+    calibrated["ai_score"] = compute_ai_score(
+        urgency=calibrated.get("urgency", 0),
+        fear=calibrated.get("fear", 0),
+        credential_theft=calibrated.get("credential_theft", 0),
+        financial_fraud=calibrated.get("financial_fraud", 0),
+        authority_impersonation=calibrated.get("authority_impersonation", 0),
     )
-
-
-def _final_summary_for_risk(summary: str, risk_level: str) -> str:
-    return final_summary_for_risk(summary, risk_level)
+    return calibrated
 
 
 def analyze_saved_email_message(
@@ -642,10 +629,12 @@ def analyze_saved_email_message(
         domain=(message.domain or "").lower(),
         url_scan_agg=url_scan_agg,
         deadline=deadline,
+        technical_context=technical_context_for_ai(message),
     )
     _check_analysis_deadline(deadline)
     if ai_result.get("_analysis_status") != "done":
         return False
+    ai_result = _calibrate_message_ai(ai_result, message, require_model_evidence=True)
     deep_required = _should_run_detailed_after_ai(message, ai_result)
     if deep_required and not _has_complete_detailed_evidence(message, max_urls=max_urls):
         _check_analysis_deadline(deadline)
@@ -672,10 +661,12 @@ def analyze_saved_email_message(
             domain=(message.domain or "").lower(),
             url_scan_agg=url_scan_agg,
             deadline=deadline,
+            technical_context=technical_context_for_ai(message),
         )
         _check_analysis_deadline(deadline)
         if ai_result.get("_analysis_status") != "done":
             return False
+        ai_result = _calibrate_message_ai(ai_result, message, require_model_evidence=True)
 
     _check_analysis_deadline(deadline)
     if _has_pending_reputation(message) and not allow_pending_reputation:
@@ -749,6 +740,9 @@ def _complete_message_analysis(
     source: str,
     allow_link_domain_vt: bool = False,
     deadline: float | None = None,
+    *,
+    require_model_evidence: bool | None = None,
+    apply_auto_spam: bool = True,
 ) -> bool:
     link_domain_scores = []
     if allow_link_domain_vt:
@@ -780,6 +774,13 @@ def _complete_message_analysis(
         f"{message.subject}\n{message.body}",
         _url_scan_agg_from_message(message),
     )
+    ai_result = _calibrate_message_ai(
+        ai_result, message,
+        require_model_evidence=(
+            source == ANALYSIS_SOURCE_DONE
+            if require_model_evidence is None else require_model_evidence
+        ),
+    )
     ai_result["ai_score"] = compute_ai_score(
         urgency=ai_result.get("urgency", 0),
         fear=ai_result.get("fear", 0),
@@ -792,6 +793,7 @@ def _complete_message_analysis(
     threat = compute_threat_result(
         ai_score=ai_result.get("ai_score", 0),
         domain_score=message.domainScore,
+        header_score=message.headerScore,
         link_domain_scores=link_domain_scores or None,
         credential_theft=ai_result.get("credential_theft", 0),
         urgency=ai_result.get("urgency", 0),
@@ -806,18 +808,38 @@ def _complete_message_analysis(
         any_malicious_attachment=any(item.get("is_malicious") for item in (message.scannedAttachments or [])),
         email_context=email_context,
         explicit_security_intent=email_context == "security_action",
+        ai_assessment=ai_result.get("_assessment"),
+        content_phishing_evidence=bool(
+            (ai_result.get("_evidence_signals") or {}).get("content_phishing")
+        ),
+        url_review_needed=bool(
+            (ai_result.get("_evidence_signals") or {}).get("form_conflict")
+        ),
     )
 
     final_verdict = _final_verdict_for_risk(threat.risk_level)
+    evidence_signals = ai_result.get("_evidence_signals") or {}
+    link_only_warning = (
+        threat.risk_level in {"Medium", "High"}
+        and not evidence_signals.get("content_phishing")
+        and (evidence_signals.get("url_threat") or evidence_signals.get("form_conflict"))
+    )
     message.urgency = ai_result.get("urgency", 0)
     message.fear = ai_result.get("fear", 0)
     message.credentialTheft = ai_result.get("credential_theft", 0)
     message.financialFraud = ai_result.get("financial_fraud", 0)
     message.authorityImpersonation = ai_result.get("authority_impersonation", 0)
-    message.aiSummary = _final_summary_for_risk(ai_result.get("ai_summary", ""), threat.risk_level)
+    message.aiSummary = final_summary_for_risk("", threat.risk_level)
+    if link_only_warning:
+        message.aiSummary = (
+            "Репутаційні перевірки посилання потребують уваги, але в тексті листа "
+            "не знайдено явної вимоги надати пароль, код або платіжні дані. "
+            "Перевірте адресу та форму незалежно від листа."
+        )
+        final_verdict = "Підозріле посилання: потрібна окрема перевірка, фішинг у тексті не доведено."
     message.verdict = final_verdict
     message.recommendations = sanitize_security_recommendations_for_risk(
-        ai_result.get("recommendations", []),
+        [],
         threat.risk_level,
         url_context,
         email_context,
@@ -829,6 +851,11 @@ def _complete_message_analysis(
     message.analysis_status = "done"
     message.analysisSource = source
     message.analysisVersion = ANALYSIS_VERSION
+    message.securitySignals = {
+        **(message.securitySignals or {}),
+        "aiEvidence": ai_result.get("_evidence", {}),
+        "analysisEvidence": ai_result.get("_evidence_signals", {}),
+    }
     message.save(
         update_fields=[
             "urgency",
@@ -846,18 +873,87 @@ def _complete_message_analysis(
             "analysis_status",
             "analysisSource",
             "analysisVersion",
+            "securitySignals",
             "synced_at",
         ]
     )
-    _apply_auto_spam_action(message)
+    if apply_auto_spam:
+        _apply_auto_spam_action(message)
     return True
+
+
+def reassess_saved_email_message(message: EmailMessage) -> bool:
+    """Re-score saved evidence without contacting AI, VT, or Gmail."""
+    if message.analysis_status != "done" or message.analysisVersion >= ANALYSIS_VERSION:
+        return False
+    signals = message.securitySignals or {}
+    saved_result = {
+        "urgency": message.urgency,
+        "fear": message.fear,
+        "credential_theft": message.credentialTheft,
+        "financial_fraud": message.financialFraud,
+        "authority_impersonation": message.authorityImpersonation,
+        "_evidence": signals.get("aiEvidence") or {},
+    }
+    return _complete_message_analysis(
+        message, saved_result, message.analysisSource or ANALYSIS_SOURCE_DONE,
+        allow_link_domain_vt=False,
+        require_model_evidence=True,
+        apply_auto_spam=False,
+    )
+
+
+def refresh_saved_email_analysis(message: EmailMessage) -> bool:
+    """Recheck saved URLs and rerun AI, without changing the Gmail spam label."""
+    if message.analysis_status != "done":
+        return False
+    max_urls, _ = _deep_scan_limits(message.account)
+    with transaction.atomic():
+        scan_result = scan_urls_in_text(
+            _message_scan_text(message), max_urls=max_urls,
+            include_tracking=True, vt_enrichment=True,
+        )
+        if any(item.get("verdict") == "Pending" for item in scan_result.get("scanned_urls", [])):
+            raise AIPendingReputation("A fresh URL reputation result is still pending.")
+        attachment_result = {
+            "attachment_score": message.attachmentScore,
+            "attachment_summary": message.attachmentScanSummary,
+            "scanned_attachments": message.scannedAttachments or [],
+        }
+        _apply_detailed_evidence(message, attachment_result, scan_result)
+        scan_context = _url_scan_agg_from_message(message)
+        scan_text = _message_scan_text(message)
+        try:
+            ai_result = analyze_email_with_providers(
+                subject=message.subject, sender=message.sender,
+                body=scan_text, domain=(message.domain or "").lower(),
+                url_scan_agg=scan_context,
+                technical_context=technical_context_for_ai(message),
+                deadline=_analysis_deadline(),
+            )
+            if ai_result.get("_analysis_status") != "done":
+                raise AIProviderUnavailable("AI did not complete the reassessment.")
+            source = ANALYSIS_SOURCE_DONE
+        except (AIProviderUnavailable, AIAnalysisTimedOut) as exc:
+            logger.warning("AI unavailable during saved email refresh %s: %s", message.gmail_id, exc)
+            ai_result = completed_local_fallback_result(
+                subject=message.subject, sender=message.sender,
+                body=scan_text, domain=(message.domain or "").lower(),
+                url_scan_agg=scan_context,
+            )
+            source = "AI unavailable"
+        return _complete_message_analysis(
+            message, ai_result, source,
+            allow_link_domain_vt=False,
+            apply_auto_spam=False,
+        )
 
 
 def _analysis_deadline(time_budget_seconds: float | None = None, deadline: float | None = None) -> float | None:
     if deadline is not None:
         return deadline
     if time_budget_seconds is None:
-        time_budget_seconds = getattr(settings, "AI_MESSAGE_TIME_BUDGET_SECONDS", 30)
+        time_budget_seconds = getattr(settings, "AI_MESSAGE_TIME_BUDGET_SECONDS", 120)
     if float(time_budget_seconds) <= 0:
         return None
     return time.monotonic() + float(time_budget_seconds)
@@ -923,6 +1019,11 @@ def _should_run_detailed_after_ai(message: EmailMessage, ai_result: dict) -> boo
     url_context = _url_scan_agg_from_message(message)
     email_context = email_context_for_analysis(message.subject, message.body, url_context)
     benign_context = email_context in {"receipt_or_invoice", "meeting_invite", "newsletter_or_info", "course_promo", "survey", "service_setup"}
+
+    # URL and attachment reputation are independent evidence, including for mail
+    # that the model considers safe. Subscription caps still bound each scan.
+    if message.attachments or extract_meaningful_urls(message.body or "", max_urls=1)[0]:
+        return True
 
     if message.domainReputation != "Trusted" or message.domainScore >= 30:
         return True

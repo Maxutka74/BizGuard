@@ -6,7 +6,7 @@ import logging
 import re
 import time
 from typing import Any
-from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+from urllib.parse import parse_qsl, urlencode, urljoin, urlsplit, urlunsplit
 
 import requests
 from django.conf import settings
@@ -61,6 +61,7 @@ TRACKING_PATH_PARTS = {
 }
 MEDIA_PATH_EXTENSIONS = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".avif")
 SHORTENER_HOSTS = {
+    "forms.gle",
     "goo.gl",
     "bit.ly",
     "tinyurl.com",
@@ -70,6 +71,8 @@ SHORTENER_HOSTS = {
     "rebrand.ly",
     "cutt.ly",
 }
+GOOGLE_FORMS_SHORT_HOST = "forms.gle"
+GOOGLE_FORMS_DESTINATION_HOST = "docs.google.com"
 STRIP_QUERY_KEYS = {
     "utm_source",
     "utm_medium",
@@ -106,7 +109,10 @@ def scan_urls_in_text(
     for url in selected_urls:
         try:
             rep = get_url_reputation(url, use_vt_enrichment=vt_enrichment)
-            scanned.append(_serialize_reputation(rep))
+            item = _serialize_reputation(rep)
+            if vt_enrichment and urlsplit(url).hostname == GOOGLE_FORMS_SHORT_HOST:
+                item = _enrich_google_form_url(item)
+            scanned.append(item)
         except Exception as exc:
             logger.warning("URL reputation failed for %s: %s", url, exc)
             scanned.append(
@@ -222,6 +228,97 @@ def _is_tracking_or_preference_url(url: str) -> bool:
     if "unsubscribe" in query or "preferences" in query or "profiletoken" in query:
         return True
     return False
+
+
+def _resolve_google_form_destination(url: str) -> str | None:
+    """Follow only HTTPS redirects between the Google Forms short and form hosts."""
+    current = url
+    for _ in range(4):
+        try:
+            parsed = urlsplit(current)
+            host = (parsed.hostname or "").lower()
+            invalid_port = parsed.port is not None
+        except ValueError:
+            return None
+        if parsed.scheme != "https" or parsed.username or parsed.password or invalid_port:
+            return None
+        if host not in {GOOGLE_FORMS_SHORT_HOST, GOOGLE_FORMS_DESTINATION_HOST}:
+            return None
+        if host == GOOGLE_FORMS_DESTINATION_HOST and not parsed.path.startswith("/forms/"):
+            return None
+        try:
+            response = requests.head(current, allow_redirects=False, timeout=5)
+        except requests.RequestException:
+            return None
+        if response.status_code in {301, 302, 303, 307, 308}:
+            location = response.headers.get("Location")
+            if not location:
+                return None
+            current = urljoin(current, location)
+            continue
+        if host == GOOGLE_FORMS_DESTINATION_HOST and response.status_code in {200, 204, 405}:
+            return normalize_url(current)
+        return None
+    return None
+
+
+def _enrich_google_form_url(item: dict[str, Any]) -> dict[str, Any]:
+    destination = _resolve_google_form_destination(str(item.get("url") or ""))
+    if not destination:
+        item["form_resolution"] = "unresolved"
+        return item
+    item["resolved_url"] = destination
+    item["form_resolution"] = "resolved"
+    try:
+        destination_rep = get_url_reputation(destination, use_vt_enrichment=True)
+    except Exception as exc:
+        logger.warning("Google Forms destination reputation failed: %s", exc)
+        item["form_resolution"] = "destination_unknown"
+        return item
+    destination_item = _serialize_reputation(destination_rep)
+    item["destination_reputation"] = {
+        "verdict": destination_item["verdict"],
+        "score": destination_item["score"],
+        "confidence": destination_item["confidence"],
+        "stats": destination_item["stats"],
+    }
+    if destination_item["is_malicious"] or destination_item["is_phishing"]:
+        item["score"] = max(int(item.get("score") or 0), int(destination_item["score"] or 0))
+        item["is_malicious"] = True
+        item["is_phishing"] = bool(item.get("is_phishing") or destination_item["is_phishing"])
+        item["verdict"] = UrlReputation.VERDICT_MALICIOUS
+        item["form_resolution"] = "destination_threat"
+        return item
+    original_provider = (item.get("stats") or {}).get("provider")
+    destination_provider = (destination_item.get("stats") or {}).get("provider")
+    original_phishing_hits = sum(
+        "phishing" in str(result.get("category") or "").lower()
+        or "phishing" in str(result.get("result") or "").lower()
+        for result in (item.get("detections") or {}).values()
+    )
+    original_stats = item.get("stats") or {}
+    destination_clean = (
+        destination_item["verdict"] == UrlReputation.VERDICT_CLEAN
+        and destination_provider in {"virustotal", "google_web_risk"}
+        and destination_item["confidence"] in {"none", "google_clean"}
+    )
+    if (
+        item.get("is_malicious")
+        and original_provider == "virustotal"
+        and int(original_stats.get("malicious") or 0) <= 2
+        and int(original_stats.get("harmless") or 0) >= 20
+        and original_phishing_hits <= 1
+        and destination_clean
+    ):
+        # Conflicting scans of the short link and its actual Google Form are
+        # still suspicious, but not two independent phishing confirmations.
+        item["verdict"] = UrlReputation.VERDICT_SUSPICIOUS
+        item["score"] = 45
+        item["is_malicious"] = False
+        item["is_phishing"] = False
+        item["confidence"] = "conflicting"
+        item["form_resolution"] = "conflicting_reputation"
+    return item
 
 
 def get_url_reputation(url: str, use_vt_enrichment: bool = False) -> UrlReputation:

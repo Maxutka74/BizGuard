@@ -1,36 +1,4 @@
-"""
-Models for Gmail Integration.
-
-Field names map 1-to-1 with the frontend EmailAnalysis TypeScript interface
-defined in src/app/components/mockData.ts so serializers need zero renaming.
-
-  id              → str  (gmail message id, used as PK slug)
-  subject         → str
-  sender          → str  (full email address)
-  senderName      → str
-  domain          → str  (extracted sender domain)
-  date            → ISO 8601 datetime str
-  body            → str  (plain text body / snippet)
-
-  -- Domain analysis (populated by services/domain.py) --
-  domainAge       → str  e.g. "4 days" | "6 years"
-  domainReputation → "Trusted" | "Suspicious" | "Malicious"
-  lookalikeDomain → str | null
-
-  -- AI analysis scores 0-100 (populated by services/analysis.py) --
-  urgency               → int
-  fear                  → int
-  credentialTheft       → int
-  financialFraud        → int
-  authorityImpersonation → int
-  aiSummary             → str
-
-  -- Composite scores --
-  aiScore       → int  (0-100)
-  domainScore   → int  (0-100)
-  threatScore   → int  (0-100, weighted: aiScore*0.7 + domainScore*0.3)
-  riskLevel     → "Critical" | "High" | "Medium" | "Safe"
-"""
+"""Gmail accounts and analyzed messages stored for the BizGuard API."""
 
 from django.db import models
 from django.conf import settings
@@ -77,11 +45,7 @@ class EmailAccount(models.Model):
 
 
 class EmailMessage(models.Model):
-    """
-    Normalised Gmail message.
-    All field names match the frontend EmailAnalysis interface exactly
-    so DRF serializers output the correct JSON keys without renaming.
-    """
+    """Normalized Gmail message with analysis and reputation evidence."""
 
     RISK_LEVEL_CHOICES = [
         ("Critical", "Critical"),

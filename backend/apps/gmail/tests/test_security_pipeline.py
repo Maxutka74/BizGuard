@@ -1,10 +1,13 @@
 from datetime import timedelta
+from io import StringIO
 from types import SimpleNamespace
+import json
 import os
 import time
 import requests
 
 from django.test import SimpleTestCase, TestCase, override_settings
+from django.core.management import call_command
 from django.utils import timezone
 from django.core.cache import cache
 from unittest.mock import patch
@@ -885,12 +888,15 @@ class LightweightAnalysisPipelineTests(TestCase):
         defaults = {
             "gmail_id": "critical-msg",
             "subject": "Verify your account now",
-            "body": "Your account will be suspended. Verify now.",
+            "body": (
+                "Within 30 minutes, enter your password at "
+                "https://bad.example.com/login or your account will be suspended."
+            ),
             "urlScore": 90,
             "hasMaliciousUrl": True,
             "scannedUrls": [
                 {
-                    "url": "https://bad.example/login",
+                    "url": "https://bad.example.com/login",
                     "verdict": "Malicious",
                     "score": 90,
                     "confidence": "high",
@@ -945,7 +951,7 @@ class LightweightAnalysisPipelineTests(TestCase):
     @patch("apps.gmail.services.sync.analyze_domain")
     @patch("apps.gmail.services.sync._run_detailed_evidence_scan")
     @patch("apps.gmail.services.sync.analyze_email_with_providers")
-    def test_safe_email_finishes_without_url_file_or_link_domain_vt(self, ai_mock, deep_mock, domain_mock):
+    def test_safe_email_scans_its_url_before_finalizing(self, ai_mock, deep_mock, domain_mock):
         ai_mock.return_value = {
             "urgency": 0,
             "fear": 0,
@@ -958,17 +964,286 @@ class LightweightAnalysisPipelineTests(TestCase):
             "recommendations": ["Перевірте відправника.", "Дійте звичайно."],
             "_analysis_status": "done",
         }
+        deep_mock.return_value = (
+            {
+                "attachment_score": 0,
+                "scanned_attachments": [],
+                "attachment_summary": "No attachments found.",
+                "attachment_text": "",
+            },
+            {
+                "url_score": 0,
+                "any_phishing": False,
+                "any_malicious": False,
+                "malicious_urls": [],
+                "phishing_urls": [],
+                "scanned_urls": [{
+                    "url": "https://docs.example.com/changelog",
+                    "verdict": "Clean",
+                    "score": 0,
+                    "is_phishing": False,
+                    "is_malicious": False,
+                }],
+                "url_summary": "No malicious indicators.",
+            },
+        )
         message = self._message()
 
         self.assertTrue(analyze_saved_email_message(message))
 
-        deep_mock.assert_not_called()
+        deep_mock.assert_called_once()
         domain_mock.assert_not_called()
         message.refresh_from_db()
         self.assertEqual(message.analysis_status, "done")
         self.assertEqual(message.riskLevel, "Safe")
-        self.assertEqual(message.scannedUrls, [])
+        self.assertEqual(len(message.scannedUrls), 1)
         self.assertEqual(message.scannedAttachments, [])
+
+    @patch("apps.gmail.services.sync._run_detailed_evidence_scan")
+    @patch("apps.gmail.services.sync.analyze_email_with_providers")
+    def test_authenticated_google_notice_stays_safe_despite_inflated_ai(self, ai_mock, deep_mock):
+        ai_mock.return_value = {
+            "urgency": 70,
+            "fear": 70,
+            "credential_theft": 80,
+            "financial_fraud": 70,
+            "authority_impersonation": 70,
+            "ai_score": 74,
+            "_evidence": {
+                key: "Оповещение системы безопасности"
+                for key in (
+                    "urgency", "fear", "credential_theft",
+                    "financial_fraud", "authority_impersonation",
+                )
+            },
+            "_analysis_status": "done",
+        }
+        deep_mock.return_value = (
+            {
+                "attachment_score": 0, "scanned_attachments": [],
+                "attachment_summary": "No attachments found.", "attachment_text": "",
+            },
+            {
+                "url_score": 0, "any_phishing": False, "any_malicious": False,
+                "malicious_urls": [], "phishing_urls": [],
+                "scanned_urls": [{
+                    "url": "https://myaccount.google.com/notifications",
+                    "verdict": "Clean", "score": 0,
+                    "is_phishing": False, "is_malicious": False,
+                }],
+                "url_summary": "No malicious indicators.",
+            },
+        )
+        message = self._message(
+            gmail_id="google-security-notice",
+            sender="Google <no-reply@accounts.google.com>",
+            domain="accounts.google.com",
+            subject="Оповещение системы безопасности",
+            body="Посмотрите уведомления в аккаунте: https://myaccount.google.com/notifications",
+            authenticationResults="mx.google.com; spf=pass; dkim=pass; dmarc=pass",
+            securitySignals={"headerFindings": [], "linkFindings": []},
+        )
+
+        self.assertTrue(analyze_saved_email_message(message))
+
+        message.refresh_from_db()
+        self.assertEqual(message.riskLevel, "Safe")
+        self.assertLessEqual(message.aiScore, 15)
+        self.assertEqual(message.urlScore, 0)
+        self.assertEqual(len(message.scannedUrls), 1)
+        self.assertIn("Ознак фішингу", message.aiSummary)
+
+    @patch("apps.gmail.services.sync.analyze_domain", return_value={"domainScore": 10})
+    @patch("apps.gmail.services.sync.analyze_email_with_providers")
+    def test_university_google_form_conflict_needs_review_not_spam(self, ai_mock, domain_mock):
+        ai_mock.return_value = {
+            "urgency": 70, "fear": 20, "credential_theft": 85,
+            "financial_fraud": 20, "authority_impersonation": 70,
+            "_assessment": "benign", "_evidence": {}, "_analysis_status": "done",
+        }
+        message = self._message(
+            gmail_id="university-form",
+            subject="Re: Тези Буколов М.Ю.",
+            sender="research@donnu.edu.ua",
+            domain="donnu.edu.ua",
+            body=(
+                "Ваші тези отримано. Нагадуємо про заявку для участі у конференції: "
+                "https://forms.gle/FvU56RiEaXkfrpAd6"
+            ),
+            authenticationResults="mx.google.com; spf=pass; dkim=pass; dmarc=pass",
+            linkScore=30,
+            securitySignals={
+                "headerFindings": [], "linkFindings": ["link_domain_mismatch"],
+            },
+            urlScore=45,
+            scannedUrls=[{
+                "url": "https://forms.gle/FvU56RiEaXkfrpAd6",
+                "resolved_url": "https://docs.google.com/forms/d/e/example/viewform",
+                "form_resolution": "conflicting_reputation",
+                "destination_reputation": {"verdict": "Clean", "score": 0},
+                "verdict": "Suspicious", "score": 45, "confidence": "conflicting",
+                "is_malicious": False, "is_phishing": False,
+            }],
+        )
+
+        self.assertTrue(analyze_saved_email_message(message))
+
+        message.refresh_from_db()
+        self.assertEqual(message.riskLevel, "Medium")
+        self.assertLessEqual(message.credentialTheft, 20)
+        self.assertLessEqual(message.authorityImpersonation, 20)
+        self.assertEqual(message.spamActionStatus, "none")
+        self.assertIn("не знайдено явної вимоги", message.aiSummary)
+        from apps.gmail.serializers import EmailDetailSerializer
+
+        self.assertIn(
+            "не знайдено явної вимоги",
+            EmailDetailSerializer(message).data["aiSummary"],
+        )
+        self.assertEqual(message.securitySignals["analysisEvidence"]["model_assessment"], "review")
+        self.assertEqual(
+            ai_mock.call_args.kwargs["technical_context"]["checked_urls"][0]["form_resolution"],
+            "conflicting_reputation",
+        )
+        domain_mock.assert_called_once()
+
+    @patch("apps.gmail.services.sync.analyze_domain", return_value={"domainScore": 10})
+    @patch("apps.gmail.services.sync.analyze_email_with_providers")
+    def test_malicious_form_url_alone_does_not_invent_password_request(self, ai_mock, domain_mock):
+        ai_mock.return_value = {
+            "urgency": 70, "fear": 20, "credential_theft": 85,
+            "financial_fraud": 20, "authority_impersonation": 70,
+            "_assessment": "phishing", "_evidence": {}, "_analysis_status": "done",
+        }
+        message = self._message(
+            gmail_id="university-unresolved-form",
+            subject="Заявка на конференцію",
+            sender="research@donnu.edu.ua",
+            domain="donnu.edu.ua",
+            body="Заповніть заявку на конференцію: https://forms.gle/FvU56RiEaXkfrpAd6",
+            linkScore=30,
+            securitySignals={
+                "headerFindings": [], "linkFindings": ["link_domain_mismatch"],
+            },
+            urlScore=85,
+            hasMaliciousUrl=True,
+            scannedUrls=[{
+                "url": "https://forms.gle/FvU56RiEaXkfrpAd6",
+                "verdict": "Malicious", "score": 85, "confidence": "high",
+                "is_malicious": True, "is_phishing": False,
+            }],
+        )
+
+        self.assertTrue(analyze_saved_email_message(message))
+
+        message.refresh_from_db()
+        self.assertEqual(message.riskLevel, "High")
+        self.assertLessEqual(message.credentialTheft, 20)
+        self.assertEqual(message.spamActionStatus, "none")
+        self.assertIn("не знайдено явної вимоги", message.aiSummary)
+        self.assertEqual(message.securitySignals["analysisEvidence"]["model_assessment"], "review")
+        domain_mock.assert_called_once()
+
+    @patch("apps.gmail.services.sync.analyze_domain")
+    @patch("apps.gmail.services.sync._apply_auto_spam_action")
+    def test_old_google_notice_can_be_reassessed_without_external_calls(self, spam_mock, domain_mock):
+        message = self._message(
+            gmail_id="old-google-notice",
+            sender="Google <no-reply@accounts.google.com>",
+            domain="accounts.google.com",
+            subject="Оповещение системы безопасности",
+            body="Посмотрите уведомления: https://myaccount.google.com/notifications",
+            authenticationResults="mx.google.com; spf=pass; dkim=pass; dmarc=pass",
+            scannedUrls=[{
+                "url": "https://myaccount.google.com/notifications",
+                "verdict": "Clean", "score": 0,
+            }],
+            securitySignals={"headerFindings": [], "linkFindings": []},
+            analysis_status="done",
+            analysis_done=True,
+            analysisSource="AI analyzer",
+            analysisVersion=6,
+            urgency=70,
+            fear=70,
+            credentialTheft=80,
+            financialFraud=70,
+            authorityImpersonation=70,
+            aiScore=74,
+            threatScore=72,
+            riskLevel="High",
+        )
+
+        dry_run_output = StringIO()
+        call_command("reassess_phishing_verdicts", stdout=dry_run_output)
+        self.assertIn("eligible=1", dry_run_output.getvalue())
+        message.refresh_from_db()
+        self.assertEqual(message.riskLevel, "High")
+
+        call_command("reassess_phishing_verdicts", "--apply", stdout=StringIO())
+
+        message.refresh_from_db()
+        self.assertEqual(message.riskLevel, "Safe")
+        self.assertEqual(message.analysisVersion, 8)
+        self.assertLessEqual(message.aiScore, 15)
+        domain_mock.assert_not_called()
+        spam_mock.assert_not_called()
+
+    @patch("apps.gmail.services.sync._apply_auto_spam_action")
+    @patch("apps.gmail.services.sync.analyze_email_with_providers")
+    @patch("apps.gmail.services.sync.scan_urls_in_text")
+    def test_targeted_refresh_rechecks_form_without_touching_gmail(self, scan_mock, ai_mock, spam_mock):
+        scan_mock.return_value = {
+            "url_score": 45, "any_phishing": False, "any_malicious": False,
+            "malicious_urls": [], "phishing_urls": [],
+            "url_summary": "Short URL and destination reputation conflict.",
+            "scanned_urls": [{
+                "url": "https://forms.gle/FvU56RiEaXkfrpAd6",
+                "resolved_url": "https://docs.google.com/forms/d/e/example/viewform",
+                "form_resolution": "conflicting_reputation",
+                "destination_reputation": {"verdict": "Clean", "score": 0},
+                "verdict": "Suspicious", "score": 45,
+                "is_malicious": False, "is_phishing": False,
+            }],
+        }
+        ai_mock.return_value = {
+            "urgency": 0, "fear": 0, "credential_theft": 0,
+            "financial_fraud": 0, "authority_impersonation": 0,
+            "_assessment": "benign", "_evidence": {}, "_analysis_status": "done",
+        }
+        message = self._message(
+            gmail_id="old-university-form",
+            subject="Re: Тези Буколов М.Ю.", sender="research@donnu.edu.ua",
+            domain="donnu.edu.ua",
+            body="Ваші тези отримано. Заповніть заявку на конференцію: https://forms.gle/FvU56RiEaXkfrpAd6",
+            authenticationResults="spf=pass; dkim=pass; dmarc=pass",
+            linkScore=30, urlScore=85, hasMaliciousUrl=True,
+            scannedUrls=[{"url": "https://forms.gle/FvU56RiEaXkfrpAd6", "verdict": "Malicious", "score": 85}],
+            securitySignals={"headerFindings": [], "linkFindings": ["link_domain_mismatch"]},
+            analysis_status="done", analysis_done=True, analysisVersion=7,
+            threatScore=82, riskLevel="Critical", spamActionStatus="moved",
+        )
+
+        call_command(
+            "reassess_phishing_verdicts", "--message-id", str(message.pk),
+            "--refresh-urls", stdout=StringIO(),
+        )
+        message.refresh_from_db()
+        self.assertEqual(message.riskLevel, "Critical")
+        scan_mock.assert_not_called()
+        ai_mock.assert_not_called()
+
+        call_command(
+            "reassess_phishing_verdicts", "--message-id", str(message.pk),
+            "--refresh-urls", "--apply", stdout=StringIO(),
+        )
+        message.refresh_from_db()
+        self.assertEqual(message.riskLevel, "Medium")
+        self.assertEqual(message.urlScore, 45)
+        self.assertEqual(message.analysisVersion, 8)
+        self.assertEqual(message.spamActionStatus, "moved")
+        self.assertEqual(message.scannedUrls[0]["form_resolution"], "conflicting_reputation")
+        self.assertEqual(ai_mock.call_args.kwargs["technical_context"]["checked_urls"][0]["form_resolution"], "conflicting_reputation")
+        spam_mock.assert_not_called()
 
     @patch("apps.gmail.services.sync.analyze_email_with_providers")
     def test_ai_summary_cannot_repeat_email_or_hallucinated_text(self, ai_mock):
@@ -1453,6 +1728,7 @@ class AiQueueTimeoutTests(TestCase):
         self.assertEqual(first.analysis_status, "done")
         self.assertEqual(second.analysis_status, "done")
 
+    @override_settings(AI_QUEUE_MAX_PARALLEL_PER_ACCOUNT=2)
     def test_queue_scheduler_claims_pending_without_inline_analysis(self):
         first = self._message("pending-a")
         second = self._message("pending-b")
@@ -1485,6 +1761,48 @@ class AiQueueTimeoutTests(TestCase):
         self.assertEqual(apply_async_mock.call_args.kwargs["args"], [self.account.id])
 
 class AiProviderTimeoutTests(SimpleTestCase):
+    @patch.dict(
+        os.environ,
+        {
+            "AI_PROVIDER_ORDER": "ollama",
+            "OLLAMA_BASE_URL": "http://ollama:11434",
+            "OLLAMA_MODEL": "qwen2.5:1.5b",
+        },
+    )
+    @patch("apps.gmail.services.ai_providers._ensure_ollama_model_ready")
+    @patch("apps.gmail.services.ai_providers.requests.post")
+    def test_ollama_evidence_and_technical_context_reach_final_result(self, post_mock, ready_mock):
+        from apps.gmail.services import ai_providers
+
+        ai_providers._OLLAMA_DISABLED_UNTIL = 0
+        response_data = {
+            "urgency": 0, "fear": 0, "credential_theft": 0,
+            "financial_fraud": 0, "authority_impersonation": 0,
+            "evidence": {
+                "urgency": "", "fear": "", "credential_theft": "",
+                "financial_fraud": "", "authority_impersonation": "",
+            },
+            "assessment": "benign",
+        }
+        post_mock.return_value = SimpleNamespace(
+            raise_for_status=lambda: None,
+            json=lambda: {"response": json.dumps(response_data), "done_reason": "stop"},
+        )
+
+        result = analyze_email_with_providers(
+            subject="Security notice", sender="notice@google.com",
+            body="Review your recent activity.", domain="google.com",
+            technical_context={"authenticated_sender": True},
+        )
+
+        self.assertEqual(result["_evidence"], response_data["evidence"])
+        self.assertEqual(result["_assessment"], "benign")
+        self.assertEqual(result["_analysis_status"], "done")
+        request_payload = post_mock.call_args.kwargs["json"]
+        self.assertIn("evidence", request_payload["format"]["required"])
+        self.assertIn('"authenticated_sender": true', request_payload["prompt"])
+        ready_mock.assert_called_once()
+
     @patch.dict(
         os.environ,
         {

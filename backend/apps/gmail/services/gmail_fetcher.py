@@ -151,10 +151,18 @@ def _normalize(raw: dict) -> dict:
     Convert a raw Gmail API message dict into the shape expected by
     EmailMessage model (and therefore the frontend).
     """
+    raw_headers = raw.get("payload", {}).get("headers", [])
     headers = {
         h["name"].lower(): h["value"]
-        for h in raw.get("payload", {}).get("headers", [])
+        for h in raw_headers
     }
+    # Only Gmail's own authentication result can support a trusted-sender
+    # decision; a sender can include a forged header with the same name.
+    gmail_authentication_results = next((
+        h.get("value", "") for h in raw_headers
+        if h.get("name", "").lower() == "authentication-results"
+        and h.get("value", "").strip().lower().startswith("mx.google.com;")
+    ), "")
     received_headers = [
         h["value"]
         for h in raw.get("payload", {}).get("headers", [])
@@ -182,7 +190,7 @@ def _normalize(raw: dict) -> dict:
         "replyTo": headers.get("reply-to", ""),
         "returnPath": headers.get("return-path", ""),
         "messageId": headers.get("message-id", ""),
-        "authenticationResults": headers.get("authentication-results", ""),
+        "authenticationResults": gmail_authentication_results,
         "receivedHeaders": received_headers,
         "dkimSignature": headers.get("dkim-signature", ""),
         "contentHash": content_hash,

@@ -13,7 +13,7 @@
  */
 
 import { api } from "./client";
-import type { RiskLevel } from "../app/components/mockData";
+import type { RiskLevel } from "../app/components/riskStyles";
 
 // ─────────────────────────────────────────────────────────────
 // TYPES
@@ -104,6 +104,13 @@ export interface ScannedUrl {
   detections?: Record<string, unknown>;
   fetched_at?: string;
   error?: string;
+  resolved_url?: string;
+  form_resolution?: "resolved" | "unresolved" | "destination_unknown" | "destination_threat" | "conflicting_reputation";
+  destination_reputation?: {
+    verdict: "Clean" | "Suspicious" | "Malicious" | "Pending" | "Error";
+    score: number;
+    confidence?: string;
+  };
 }
 
 export interface EmailStats {
